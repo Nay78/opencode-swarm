@@ -1,17 +1,5 @@
 // Agent category definitions
-export const SME_AGENTS = [
-	'sme_windows',
-	'sme_powershell',
-	'sme_python',
-	'sme_oracle',
-	'sme_network',
-	'sme_security',
-	'sme_linux',
-	'sme_vmware',
-	'sme_azure',
-	'sme_active_directory',
-	'sme_ui_ux',
-] as const;
+export const SME_AGENT = 'sme' as const;
 
 export const QA_AGENTS = ['security_reviewer', 'auditor'] as const;
 
@@ -20,7 +8,7 @@ export const PIPELINE_AGENTS = ['coder', 'test_engineer'] as const;
 export const ORCHESTRATOR_NAME = 'architect' as const;
 
 export const ALL_SUBAGENT_NAMES = [
-	...SME_AGENTS,
+	SME_AGENT,
 	...QA_AGENTS,
 	...PIPELINE_AGENTS,
 ] as const;
@@ -31,10 +19,12 @@ export const ALL_AGENT_NAMES = [
 ] as const;
 
 // Type definitions
-export type SMEAgentName = (typeof SME_AGENTS)[number];
 export type QAAgentName = (typeof QA_AGENTS)[number];
 export type PipelineAgentName = (typeof PIPELINE_AGENTS)[number];
 export type AgentName = (typeof ALL_AGENT_NAMES)[number];
+
+// Legacy type for backwards compatibility
+export type SMEAgentName = 'sme';
 
 // Category prefixes for config
 export const CATEGORY_PREFIXES = {
@@ -47,8 +37,11 @@ export const DEFAULT_MODELS: Record<string, string> = {
 	// Orchestrator
 	architect: 'anthropic/claude-sonnet-4.5',
 
+	// SME (unified)
+	sme: 'google/gemini-3-flash',
+
 	// Pipeline agents
-	coder: 'openai/gpt-5.2-codex',
+	coder: 'anthropic/claude-sonnet-4.5',
 	test_engineer: 'google/gemini-3-flash',
 
 	// Category defaults
@@ -215,14 +208,9 @@ export const DOMAIN_PATTERNS: Record<string, RegExp[]> = {
 	],
 };
 
-// Map domain name to SME agent name
-export function domainToAgentName(domain: string): SMEAgentName {
-	return `sme_${domain.toLowerCase().replace(/\s+/g, '_')}` as SMEAgentName;
-}
-
-// Check if agent is in SME category
-export function isSMEAgent(name: string): name is SMEAgentName {
-	return (SME_AGENTS as readonly string[]).includes(name);
+// Map domain name to SME agent name (now just returns 'sme')
+export function domainToAgentName(_domain: string): 'sme' {
+	return 'sme';
 }
 
 // Check if agent is in QA category

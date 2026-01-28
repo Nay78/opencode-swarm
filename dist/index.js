@@ -11,24 +11,12 @@ var __export = (target, all) => {
 };
 
 // src/config/constants.ts
-var SME_AGENTS = [
-  "sme_windows",
-  "sme_powershell",
-  "sme_python",
-  "sme_oracle",
-  "sme_network",
-  "sme_security",
-  "sme_linux",
-  "sme_vmware",
-  "sme_azure",
-  "sme_active_directory",
-  "sme_ui_ux"
-];
+var SME_AGENT = "sme";
 var QA_AGENTS = ["security_reviewer", "auditor"];
 var PIPELINE_AGENTS = ["coder", "test_engineer"];
 var ORCHESTRATOR_NAME = "architect";
 var ALL_SUBAGENT_NAMES = [
-  ...SME_AGENTS,
+  SME_AGENT,
   ...QA_AGENTS,
   ...PIPELINE_AGENTS
 ];
@@ -42,7 +30,8 @@ var CATEGORY_PREFIXES = {
 };
 var DEFAULT_MODELS = {
   architect: "anthropic/claude-sonnet-4.5",
-  coder: "openai/gpt-5.2-codex",
+  sme: "google/gemini-3-flash",
+  coder: "anthropic/claude-sonnet-4.5",
   test_engineer: "google/gemini-3-flash",
   _sme: "google/gemini-3-flash",
   _qa: "google/gemini-3-flash",
@@ -202,9 +191,6 @@ var DOMAIN_PATTERNS = {
     /\bresponsive\b/i
   ]
 };
-function isSMEAgent(name) {
-  return SME_AGENTS.includes(name);
-}
 function isQAAgent(name) {
   return QA_AGENTS.includes(name);
 }
@@ -13749,22 +13735,12 @@ var AgentOverrideConfigSchema = exports_external.object({
   temperature: exports_external.number().min(0).max(2).optional(),
   disabled: exports_external.boolean().optional()
 });
-var PresetSchema = exports_external.record(exports_external.string(), AgentOverrideConfigSchema);
-var SwarmModeSchema = exports_external.enum(["remote", "hybrid"]);
 var PluginConfigSchema = exports_external.object({
-  preset: exports_external.string().optional(),
-  presets: exports_external.record(exports_external.string(), PresetSchema).optional(),
   agents: exports_external.record(exports_external.string(), AgentOverrideConfigSchema).optional(),
   max_iterations: exports_external.number().min(1).max(10).default(5),
-  output_dir: exports_external.string().optional(),
-  swarm_mode: SwarmModeSchema.default("remote"),
-  gpu_url: exports_external.string().optional(),
-  gpu_model: exports_external.string().optional(),
-  npu_url: exports_external.string().optional(),
-  npu_model: exports_external.string().optional(),
-  global_fallback_models: exports_external.array(exports_external.string()).optional(),
+  multi_domain_sme: exports_external.boolean().default(true),
   auto_detect_domains: exports_external.boolean().default(true),
-  inject_phase_reminders: exports_external.boolean().default(true)
+  inject_phase_reminders: exports_external.boolean().default(false)
 });
 // src/config/loader.ts
 import * as fs from "fs";
@@ -13815,9 +13791,9 @@ function loadPluginConfig(directory) {
   const projectConfigPath = path.join(directory, ".opencode", CONFIG_FILENAME);
   let config2 = loadConfigFromPath(userConfigPath) ?? {
     max_iterations: 5,
-    swarm_mode: "remote",
+    multi_domain_sme: true,
     auto_detect_domains: true,
-    inject_phase_reminders: true
+    inject_phase_reminders: false
   };
   const projectConfig = loadConfigFromPath(projectConfigPath);
   if (projectConfig) {
@@ -13826,20 +13802,6 @@ function loadPluginConfig(directory) {
       ...projectConfig,
       agents: deepMerge(config2.agents, projectConfig.agents)
     };
-  }
-  const envPreset = process.env.OPENCODE_SWARM_PRESET;
-  if (envPreset) {
-    config2.preset = envPreset;
-  }
-  if (config2.preset) {
-    const preset = config2.presets?.[config2.preset];
-    if (preset) {
-      config2.agents = deepMerge(preset, config2.agents);
-    } else {
-      const presetSource = envPreset === config2.preset ? "environment variable" : "config file";
-      const availablePresets = config2.presets ? Object.keys(config2.presets).join(", ") : "none";
-      console.warn(`[opencode-swarm] Preset "${config2.preset}" not found (from ${presetSource}). Available: ${availablePresets}`);
-    }
   }
   return config2;
 }
@@ -13867,41 +13829,33 @@ function loadAgentPrompt(agentName) {
 // src/agents/architect.ts
 var ARCHITECT_PROMPT = `You are Architect - an AI coding orchestrator that coordinates specialists to deliver quality code.
 
-**Role**: Analyze requests, coordinate SME consultations, delegate implementation, and manage QA review.
+**Role**: Analyze requests, consult SME for domain expertise, delegate implementation, and manage QA review.
 
 **Agents**:
 
-@sme_windows - Windows OS internals, registry, services, WMI/CIM
-@sme_powershell - PowerShell scripting, cmdlets, modules, remoting
-@sme_python - Python ecosystem, libraries, best practices
-@sme_oracle - Oracle Database, SQL/PLSQL, administration
-@sme_network - Networking, firewalls, DNS, TLS/SSL, load balancing
-@sme_security - STIG compliance, hardening, CVE, encryption, PKI
-@sme_linux - Linux administration, systemd, package management
-@sme_vmware - VMware vSphere, ESXi, PowerCLI, virtualization
-@sme_azure - Azure cloud services, Entra ID, ARM/Bicep
-@sme_active_directory - Active Directory, LDAP, Group Policy, Kerberos
-@sme_ui_ux - UI/UX design, interaction patterns, accessibility
-
+@sme - Multi-domain subject matter expert (handles all technical domains in one call)
 @coder - Implementation specialist, writes production code
 @security_reviewer - Security audit, vulnerability assessment
 @auditor - Code quality review, correctness verification
 @test_engineer - Test case generation and validation scripts
 
+**Available SME Domains**: windows, powershell, python, oracle, network, security, linux, vmware, azure, active_directory, ui_ux
+
 **Workflow**:
 
 ## 1. Analyze (you do this)
 Parse request: explicit requirements + implicit needs.
-Identify which SME domains are relevant.
+Identify which domains are relevant.
 Create initial specification.
 
-## 2. SME Consultation (delegate serially)
-For each relevant domain, delegate to @sme_* agent one at a time.
-Wait for each response before calling the next.
+## 2. SME Consultation (single call to @sme)
+Delegate to @sme with ALL relevant domains in one request.
+Example: "I need expertise for: windows, powershell, security"
+Wait for response.
 
 ## 3. Collate (you do this)
-Synthesize SME inputs into unified specification.
-Resolve conflicts, remove redundancy, ensure clarity.
+Synthesize SME input into unified specification.
+Ensure clarity and completeness.
 
 ## 4. Code (delegate to @coder)
 Send unified specification to @coder.
@@ -13924,7 +13878,7 @@ Send approved code to @test_engineer for test generation.
 - All agents run serially (one at a time)
 - Wait for each agent response before calling the next
 - Reference paths/lines, don't paste entire files
-- Brief delegation notices: "Consulting @sme_powershell..." not lengthy explanations
+- Brief delegation notices: "Consulting @sme for windows, powershell..."
 
 **Communication**:
 - Be direct, no preamble or flattery
@@ -14187,56 +14141,60 @@ ${customAppendPrompt}`;
   };
 }
 
-// src/agents/sme/base.ts
-function createSMEPrompt(config2) {
-  const { domain: domain2, description, guidance } = config2;
-  return `You are ${domain2}_SME - a subject matter expert in ${description}.
+// src/agents/sme-unified.ts
+var DOMAIN_EXPERTISE = {
+  windows: `Windows OS: Registry, services, WMI/CIM, event logs, scheduled tasks, Group Policy, installers, WinRM`,
+  powershell: `PowerShell: Cmdlets, modules, remoting, Pester testing, pipeline, error handling, PSCustomObject`,
+  python: `Python: pip, venv, Django, Flask, pandas, numpy, pytest, async/await, type hints`,
+  oracle: `Oracle DB: SQL/PLSQL, tablespaces, RMAN, DataGuard, ASM, RAC, TNS, ORA errors`,
+  network: `Networking: TCP/UDP, DNS, DHCP, firewalls, VLANs, routing, load balancing, TLS/SSL, certificates`,
+  security: `Security: STIG compliance, hardening, CVE remediation, SCAP, FIPS, PKI, encryption, CAC`,
+  linux: `Linux: systemd, bash, yum/apt, cron, permissions, SELinux, journalctl`,
+  vmware: `VMware: vSphere, ESXi, vCenter, VSAN, NSX, PowerCLI, datastores, vMotion`,
+  azure: `Azure: Entra ID, ARM/Bicep, KeyVault, Blob storage, Azure DevOps, managed identities`,
+  active_directory: `Active Directory: LDAP, Group Policy, Kerberos, SPNs, domain trusts, ADUC, replication`,
+  ui_ux: `UI/UX: Interaction patterns, accessibility (WCAG), responsive design, typography, color theory, layout`
+};
+var UNIFIED_SME_PROMPT = `You are SME (Subject Matter Expert) - a multi-domain technical specialist.
 
-**Role**: Provide domain-specific technical context to enhance the Architect's specification. Your output will be read by the Architect for collation, not directly by a human or coder.
-
-**Domain Expertise**:
-${guidance}
+**Role**: Provide domain-specific technical context for all requested domains in a single response. Your output will be read by the Architect for collation.
 
 **Behavior**:
-- Be specific: exact names, paths, parameters, not general advice
-- Be concise: under 4000 characters
+- Address ALL domains listed in the request
+- Be specific: exact names, paths, parameters, API signatures
+- Be concise: focus only on implementation-relevant details
 - Be actionable: information the Coder can directly use
-- Focus on implementation-relevant details only
-- Include version-specific notes if applicable
+
+**Domain Expertise Available**:
+${Object.entries(DOMAIN_EXPERTISE).map(([domain2, desc]) => `- ${domain2}: ${desc}`).join(`
+`)}
 
 **Output Format**:
-<${domain2}_context>
-**Critical Considerations**:
-[Must-know information that affects implementation]
+<sme_context>
+For each relevant domain, provide:
 
-**Recommended Approach**:
-[Best practices and patterns for this domain]
+**[Domain Name]**:
+- Critical considerations for implementation
+- Recommended approach and patterns
+- Specific APIs, cmdlets, or functions to use
+- Common gotchas to avoid
+- Dependencies required
 
-**API/Syntax Details**:
-[Exact cmdlet names, function signatures, class names]
+</sme_context>
 
-**Gotchas**:
-[Common mistakes to avoid]
-
-**Dependencies**:
-[Required modules, services, permissions]
-
-**Code Patterns**:
-[Short snippets showing correct usage if helpful]
-</${domain2}_context>`;
-}
-function createSMEAgent(agentName, domainConfig, model, customPrompt, customAppendPrompt) {
-  let prompt = createSMEPrompt(domainConfig);
+Keep total response under 4000 characters for efficient processing.`;
+function createUnifiedSMEAgent(model, customPrompt, customAppendPrompt) {
+  let prompt = UNIFIED_SME_PROMPT;
   if (customPrompt) {
     prompt = customPrompt;
   } else if (customAppendPrompt) {
-    prompt = `${prompt}
+    prompt = `${UNIFIED_SME_PROMPT}
 
 ${customAppendPrompt}`;
   }
   return {
-    name: agentName,
-    description: `Subject matter expert for ${domainConfig.description}. Provides domain-specific technical context for the Architect.`,
+    name: "sme",
+    description: "Multi-domain subject matter expert. Provides technical context for multiple domains in a single call.",
     config: {
       model,
       temperature: 0.2,
@@ -14244,284 +14202,14 @@ ${customAppendPrompt}`;
     }
   };
 }
-
-// src/agents/sme/active-directory.ts
-var activeDirectorySMEConfig = {
-  domain: "active_directory",
-  description: "Active Directory and identity management",
-  guidance: `For Active Directory tasks, provide:
-- AD PowerShell module cmdlets (Get-ADUser, Set-ADUser, etc.)
-- LDAP filter syntax and examples
-- Distinguished name (DN) formats
-- Group Policy structure and processing order
-- Kerberos authentication flow considerations
-- SPN (Service Principal Name) configuration
-- AD schema and common attributes
-- Replication and site topology concepts
-- Organizational Unit (OU) design patterns
-- Security group types (Domain Local, Global, Universal)
-- Delegation of control patterns
-- Fine-grained password policies
-- AD object GUIDs and SIDs
-- Trust relationships
-- ADSI/DirectoryServices .NET classes
-- Common AD error codes and resolutions
-- Group Policy preferences vs policies`
-};
-
-// src/agents/sme/azure.ts
-var azureSMEConfig = {
-  domain: "azure",
-  description: "Microsoft Azure cloud services",
-  guidance: `For Azure tasks, provide:
-- Az PowerShell module cmdlets (Az.Accounts, Az.Compute, etc.)
-- Azure CLI (az) command syntax
-- ARM template structure and syntax
-- Bicep syntax and patterns
-- Entra ID (formerly Azure AD) configuration
-- RBAC role assignments and custom roles
-- Resource naming conventions and constraints
-- Service principal and managed identity configuration
-- Azure resource provider namespaces
-- Common Azure resource types and properties
-- Subscription and resource group scoping
-- Azure networking (VNet, NSG, Load Balancer)
-- Storage account types and access tiers
-- Azure Key Vault integration patterns
-- Cost management considerations
-- Azure Government differences if applicable`
-};
-
-// src/agents/sme/linux.ts
-var linuxSMEConfig = {
-  domain: "linux",
-  description: "Linux system administration",
-  guidance: `For Linux tasks, provide:
-- Distribution-specific commands (RHEL/CentOS vs Ubuntu/Debian)
-- Systemd unit file structure (service, timer, socket units)
-- File permissions and ownership (chmod, chown, ACLs)
-- SELinux/AppArmor considerations (contexts, policies, booleans)
-- Package management commands (yum/dnf vs apt)
-- Cron syntax and systemd timer alternatives
-- Log file locations (/var/log, journalctl)
-- Service management patterns (systemctl, enable, start)
-- User and group management
-- Filesystem hierarchy standard (FHS) paths
-- Shell scripting best practices (bash, POSIX compliance)
-- Process management (ps, top, kill signals)
-- Network configuration (nmcli, ip, netplan)
-- Environment variables and profile scripts`
-};
-
-// src/agents/sme/network.ts
-var networkSMEConfig = {
-  domain: "network",
-  description: "network architecture, protocols, and security",
-  guidance: `For network tasks, provide:
-- Protocol specifications and standard port numbers
-- Firewall rule syntax (Windows Firewall, iptables, firewalld)
-- DNS record types and configuration (A, AAAA, CNAME, MX, TXT, SRV)
-- Certificate requirements and chain validation
-- TLS/SSL configuration best practices (cipher suites, protocols)
-- Load balancer and proxy considerations
-- Network troubleshooting commands (ping, tracert, nslookup, netstat)
-- Security group and ACL patterns
-- IP addressing and subnetting
-- VLAN configuration concepts
-- NAT and port forwarding
-- HTTP/HTTPS specifics (headers, status codes, methods)
-- Socket programming considerations
-- Common network errors and their causes`
-};
-
-// src/agents/sme/oracle.ts
-var oracleSMEConfig = {
-  domain: "oracle",
-  description: "Oracle Database administration and SQL/PLSQL",
-  guidance: `For Oracle tasks, provide:
-- Correct SQL syntax for Oracle (not MySQL/SQL Server)
-- PL/SQL block structure and exception handling
-- CDB/PDB architecture considerations
-- Parameter names and valid values (init.ora, spfile)
-- Required privileges and roles (DBA, SYSDBA, specific grants)
-- Data dictionary views (DBA_*, ALL_*, USER_*, V$*, GV$*)
-- RMAN commands and syntax
-- TNS configuration and connectivity (tnsnames.ora, listener.ora)
-- Oracle-specific functions (NVL, DECODE, LISTAGG, etc.)
-- Bind variable usage for performance
-- Transaction handling (COMMIT, ROLLBACK, savepoints)
-- LOB handling (CLOB, BLOB operations)
-- Date/timestamp handling (TO_DATE, TO_TIMESTAMP, NLS settings)
-- Execution plan analysis (EXPLAIN PLAN, hints)`
-};
-
-// src/agents/sme/powershell.ts
-var powershellSMEConfig = {
-  domain: "powershell",
-  description: "PowerShell scripting and automation",
-  guidance: `For PowerShell tasks, provide:
-- Correct cmdlet names, parameters, and syntax
-- Required modules and how to import them (Import-Module, #Requires)
-- Pipeline patterns and object handling
-- Error handling with try/catch and $ErrorActionPreference
-- Output formatting and object types ([PSCustomObject], etc.)
-- Remote execution (PSSession, Invoke-Command, -ComputerName)
-- Module compatibility (Windows PowerShell 5.1 vs PowerShell 7+)
-- Common parameter patterns (-Verbose, -WhatIf, -Confirm, -ErrorAction)
-- Splatting for complex parameter sets
-- Advanced function patterns ([CmdletBinding()], param blocks)
-- Pester testing patterns for the code
-- Credential handling (Get-Credential, [PSCredential])
-- Output streams (Write-Output, Write-Verbose, Write-Error)`
-};
-
-// src/agents/sme/python.ts
-var pythonSMEConfig = {
-  domain: "python",
-  description: "Python development and ecosystem",
-  guidance: `For Python tasks, provide:
-- Recommended libraries for the task (stdlib vs third-party)
-- Windows-specific modules (pywin32, wmi, winreg, ctypes)
-- Correct API usage patterns and idioms
-- Virtual environment considerations (venv, pip install)
-- Type hints and dataclass usage
-- Exception handling patterns (specific exceptions, context managers)
-- File handling (pathlib vs os.path, encoding considerations)
-- Cross-platform compatibility notes
-- Async patterns if applicable (asyncio, aiohttp)
-- Logging configuration (logging module setup)
-- Package structure for larger scripts
-- Python version compatibility (3.8+ features)
-- Common gotchas (mutable default arguments, import cycles)`
-};
-
-// src/agents/sme/security.ts
-var securitySMEConfig = {
-  domain: "security",
-  description: "cybersecurity, compliance, and hardening",
-  guidance: `For security tasks, provide:
-- STIG requirements and check IDs (V-#####, SV-#####)
-- DISA compliance requirements
-- FIPS 140-2/3 considerations (approved algorithms, modes)
-- CAC/PIV/PKI implementation details
-- Encryption standards and key management
-- Audit logging requirements (what to log, retention)
-- Least privilege patterns
-- Secure configuration baselines
-- CIS Benchmark references if applicable
-- Common vulnerability patterns to avoid
-- Authentication and authorization best practices
-- Secrets management (no hardcoding, secure storage)
-- Input validation and sanitization
-- Secure communication requirements (TLS versions, cipher suites)
-- DoD/Federal specific requirements if applicable`
-};
-
-// src/agents/sme/ui-ux.ts
-var uiUxSMEConfig = {
-  domain: "ui_ux",
-  description: "UI/UX design, interaction patterns, and visual systems",
-  guidance: `For UI/UX tasks, provide:
-- Information architecture and navigation flow
-- Interaction patterns and states (loading, empty, error, success)
-- Responsive layout guidance and breakpoints
-- Typography scale and hierarchy recommendations
-- Spacing system (8px grid, consistent margins/padding)
-- Color usage (primary, secondary, semantic colors)
-- Contrast and accessibility requirements (WCAG 2.1 AA)
-- Component structure and reusability patterns
-- Form design best practices (labels, validation, feedback)
-- Motion/animation guidance (purposeful, not excessive)
-- Touch target sizes for mobile (44px minimum)
-- Focus management for keyboard navigation
-- Icon usage and consistency
-- Empty states and error message design
-- Progressive disclosure patterns
-- Loading and skeleton states`
-};
-
-// src/agents/sme/vmware.ts
-var vmwareSMEConfig = {
-  domain: "vmware",
-  description: "VMware vSphere and virtualization",
-  guidance: `For VMware tasks, provide:
-- PowerCLI cmdlet names and syntax (Get-VM, Set-VM, etc.)
-- vSphere API objects and methods
-- ESXi shell commands (esxcli, vim-cmd)
-- Datastore path formats ([datastore1] path/to/file.vmdk)
-- VM hardware version compatibility
-- vMotion and DRS requirements and constraints
-- Storage policy configuration (SPBM)
-- Network adapter types and configurations (vmxnet3, e1000e)
-- Snapshot management considerations
-- Template and clone operations
-- Resource pool and cluster concepts
-- vCenter Server connection handling
-- Certificate and authentication requirements
-- Common vSphere error codes and solutions
-- Performance metrics and monitoring (Get-Stat)`
-};
-
-// src/agents/sme/windows.ts
-var windowsSMEConfig = {
-  domain: "windows",
-  description: "Windows operating system internals and administration",
-  guidance: `For Windows tasks, provide:
-- Registry paths and correct hive locations (HKLM, HKCU, HKU)
-- WMI/CIM class names and properties (Win32_*, CIM_*)
-- Service names (exact), dependencies, and startup types
-- File system locations (System32, SysWOW64, ProgramData, AppData)
-- Permission requirements (admin, SYSTEM, TrustedInstaller)
-- COM objects and interfaces when relevant
-- Event log sources, channels, and event IDs
-- Scheduled task configuration (triggers, actions, principals)
-- Windows API calls if needed (P/Invoke signatures)
-- UAC considerations and elevation requirements
-- 32-bit vs 64-bit considerations (WoW64 redirection)`
-};
-
-// src/agents/sme/index.ts
-var SME_CONFIGS = {
-  windows: windowsSMEConfig,
-  powershell: powershellSMEConfig,
-  python: pythonSMEConfig,
-  oracle: oracleSMEConfig,
-  network: networkSMEConfig,
-  security: securitySMEConfig,
-  linux: linuxSMEConfig,
-  vmware: vmwareSMEConfig,
-  azure: azureSMEConfig,
-  active_directory: activeDirectorySMEConfig,
-  ui_ux: uiUxSMEConfig
-};
-var AGENT_TO_DOMAIN = {
-  sme_windows: "windows",
-  sme_powershell: "powershell",
-  sme_python: "python",
-  sme_oracle: "oracle",
-  sme_network: "network",
-  sme_security: "security",
-  sme_linux: "linux",
-  sme_vmware: "vmware",
-  sme_azure: "azure",
-  sme_active_directory: "active_directory",
-  sme_ui_ux: "ui_ux"
-};
-function createAllSMEAgents(getModel, loadPrompt) {
-  return Object.entries(AGENT_TO_DOMAIN).map(([agentName, domain2]) => {
-    const config2 = SME_CONFIGS[domain2];
-    const model = getModel(agentName);
-    const prompts = loadPrompt(agentName);
-    return createSMEAgent(agentName, config2, model, prompts.prompt, prompts.appendPrompt);
-  });
-}
+var AVAILABLE_DOMAINS = Object.keys(DOMAIN_EXPERTISE);
 
 // src/agents/index.ts
 function getModelForAgent(agentName, config2) {
   const explicit = config2?.agents?.[agentName]?.model;
   if (explicit)
     return explicit;
-  if (isSMEAgent(agentName)) {
+  if (agentName === "sme") {
     const categoryModel = config2?.agents?.[CATEGORY_PREFIXES.sme]?.model;
     if (categoryModel)
       return categoryModel;
@@ -14557,11 +14245,10 @@ function createAgents(config2) {
     const architect = createArchitectAgent(getModel("architect"), architectPrompts.prompt, architectPrompts.appendPrompt);
     agents.push(applyOverrides(architect, config2));
   }
-  const smeAgents = createAllSMEAgents(getModel, getPrompts);
-  for (const sme of smeAgents) {
-    if (!isAgentDisabled(sme.name, config2)) {
-      agents.push(applyOverrides(sme, config2));
-    }
+  if (!isAgentDisabled("sme", config2)) {
+    const smePrompts = getPrompts("sme");
+    const sme = createUnifiedSMEAgent(getModel("sme"), smePrompts.prompt, smePrompts.appendPrompt);
+    agents.push(applyOverrides(sme, config2));
   }
   if (!isAgentDisabled("coder", config2)) {
     const coderPrompts = getPrompts("coder");
@@ -27134,7 +26821,6 @@ var OpenCodeSwarm = async (ctx) => {
   const pipelineHook = createPipelineTrackerHook(config3);
   log("Plugin initialized", {
     directory: ctx.directory,
-    swarmMode: config3.swarm_mode,
     maxIterations: config3.max_iterations,
     agentCount: Object.keys(agents).length
   });
@@ -27144,18 +26830,6 @@ var OpenCodeSwarm = async (ctx) => {
     tool: {
       detect_domains,
       extract_code_blocks
-    },
-    config: async (opencodeConfig) => {
-      opencodeConfig.default_agent = "architect";
-      if (!opencodeConfig.agent) {
-        opencodeConfig.agent = { ...agents };
-      } else {
-        Object.assign(opencodeConfig.agent, agents);
-      }
-      log("Config applied", {
-        defaultAgent: "architect",
-        agents: Object.keys(agents)
-      });
     },
     "experimental.chat.messages.transform": pipelineHook["experimental.chat.messages.transform"]
   };

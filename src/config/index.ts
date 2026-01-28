@@ -7,10 +7,9 @@ export {
 	ORCHESTRATOR_NAME,
 	PIPELINE_AGENTS,
 	QA_AGENTS,
-	SME_AGENTS,
+	SME_AGENT,
 	domainToAgentName,
 	isQAAgent,
-	isSMEAgent,
 	isSubagent,
 } from './constants';
 
@@ -24,19 +23,14 @@ export type {
 export {
 	AgentOverrideConfigSchema,
 	PluginConfigSchema,
-	PresetSchema,
-	SwarmModeSchema,
 } from './schema';
 
 export type {
 	AgentOverrideConfig,
 	PluginConfig,
-	Preset,
-	SwarmMode,
 } from './schema';
 
 export {
-	getOutputDir,
 	loadAgentPrompt,
 	loadPluginConfig,
 } from './loader';

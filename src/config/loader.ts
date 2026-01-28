@@ -98,9 +98,9 @@ export function loadPluginConfig(directory: string): PluginConfig {
 
 	let config: PluginConfig = loadConfigFromPath(userConfigPath) ?? {
 		max_iterations: 5,
-		swarm_mode: 'remote',
+		multi_domain_sme: true,
 		auto_detect_domains: true,
-		inject_phase_reminders: true,
+		inject_phase_reminders: false,
 	};
 
 	const projectConfig = loadConfigFromPath(projectConfigPath);
@@ -110,32 +110,6 @@ export function loadPluginConfig(directory: string): PluginConfig {
 			...projectConfig,
 			agents: deepMerge(config.agents, projectConfig.agents),
 		};
-	}
-
-	// Override preset from environment variable
-	const envPreset = process.env.OPENCODE_SWARM_PRESET;
-	if (envPreset) {
-		config.preset = envPreset;
-	}
-
-	// Resolve preset and merge with root agents
-	if (config.preset) {
-		const preset = config.presets?.[config.preset];
-		if (preset) {
-			config.agents = deepMerge(
-				preset as Record<string, unknown>,
-				config.agents as Record<string, unknown>
-			) as typeof config.agents;
-		} else {
-			const presetSource =
-				envPreset === config.preset ? 'environment variable' : 'config file';
-			const availablePresets = config.presets
-				? Object.keys(config.presets).join(', ')
-				: 'none';
-			console.warn(
-				`[opencode-swarm] Preset "${config.preset}" not found (from ${presetSource}). Available: ${availablePresets}`
-			);
-		}
 	}
 
 	return config;
@@ -183,16 +157,4 @@ export function loadAgentPrompt(agentName: string): {
 	}
 
 	return result;
-}
-
-/**
- * Get the output directory for generated files.
- */
-export function getOutputDir(config: PluginConfig, projectDir: string): string {
-	if (config.output_dir) {
-		return path.isAbsolute(config.output_dir)
-			? config.output_dir
-			: path.join(projectDir, config.output_dir);
-	}
-	return path.join(projectDir, 'swarm_output');
 }

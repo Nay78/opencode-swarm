@@ -17,7 +17,3 @@ export declare function loadAgentPrompt(agentName: string): {
     prompt?: string;
     appendPrompt?: string;
 };
-/**
- * Get the output directory for generated files.
- */
-export declare function getOutputDir(config: PluginConfig, projectDir: string): string;

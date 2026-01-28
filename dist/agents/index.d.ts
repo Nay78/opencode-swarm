@@ -16,4 +16,4 @@ export { createCoderAgent } from './coder';
 export { createSecurityReviewerAgent } from './security-reviewer';
 export { createAuditorAgent } from './auditor';
 export { createTestEngineerAgent } from './test-engineer';
-export { createAllSMEAgents, createSMEAgent, listDomains } from './sme';
+export { createUnifiedSMEAgent, AVAILABLE_DOMAINS } from './sme-unified';

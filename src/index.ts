@@ -22,7 +22,6 @@ const OpenCodeSwarm: Plugin = async (ctx) => {
 
 	log('Plugin initialized', {
 		directory: ctx.directory,
-		swarmMode: config.swarm_mode,
 		maxIterations: config.max_iterations,
 		agentCount: Object.keys(agents).length,
 	});
@@ -30,31 +29,13 @@ const OpenCodeSwarm: Plugin = async (ctx) => {
 	return {
 		name: 'opencode-swarm',
 
-		// Register all agents
+		// Register all agents (adds to existing, doesn't replace)
 		agent: agents,
 
 		// Register tools
 		tool: {
 			detect_domains,
 			extract_code_blocks,
-		},
-
-		// Configure OpenCode
-		config: async (opencodeConfig: Record<string, unknown>) => {
-			// Set architect as default agent
-			(opencodeConfig as { default_agent?: string }).default_agent = 'architect';
-
-			// Merge agent configs
-			if (!opencodeConfig.agent) {
-				opencodeConfig.agent = { ...agents };
-			} else {
-				Object.assign(opencodeConfig.agent, agents);
-			}
-
-			log('Config applied', {
-				defaultAgent: 'architect',
-				agents: Object.keys(agents),
-			});
 		},
 
 		// Inject phase reminders before API calls
@@ -72,7 +53,6 @@ export type {
 	SMEAgentName,
 	QAAgentName,
 	PipelineAgentName,
-	SwarmMode,
 } from './config';
 
 export type { AgentDefinition } from './agents';

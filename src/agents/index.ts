@@ -3,9 +3,7 @@ import {
 	CATEGORY_PREFIXES,
 	DEFAULT_MODELS,
 	QA_AGENTS,
-	SME_AGENTS,
 	isQAAgent,
-	isSMEAgent,
 	isSubagent,
 } from '../config/constants';
 import { loadAgentPrompt, type PluginConfig } from '../config';
@@ -14,37 +12,33 @@ import { createAuditorAgent } from './auditor';
 import { createCoderAgent } from './coder';
 import { createSecurityReviewerAgent } from './security-reviewer';
 import { createTestEngineerAgent } from './test-engineer';
-import { createAllSMEAgents } from './sme';
+import { createUnifiedSMEAgent } from './sme-unified';
 
 export type { AgentDefinition } from './architect';
 
 /**
  * Get the model for an agent, considering category defaults and explicit overrides.
- *
- * Priority:
- * 1. Explicit agent override (config.agents[agentName].model)
- * 2. Category default (config.agents['_sme'].model or config.agents['_qa'].model)
- * 3. Default model from constants
  */
 function getModelForAgent(agentName: string, config?: PluginConfig): string {
 	// 1. Check explicit override
 	const explicit = config?.agents?.[agentName]?.model;
 	if (explicit) return explicit;
 
-	// 2. Check category default
-	if (isSMEAgent(agentName)) {
+	// 2. Check category default for SME
+	if (agentName === 'sme') {
 		const categoryModel = config?.agents?.[CATEGORY_PREFIXES.sme]?.model;
 		if (categoryModel) return categoryModel;
 		return DEFAULT_MODELS._sme;
 	}
 
+	// 3. Check category default for QA
 	if (isQAAgent(agentName)) {
 		const categoryModel = config?.agents?.[CATEGORY_PREFIXES.qa]?.model;
 		if (categoryModel) return categoryModel;
 		return DEFAULT_MODELS._qa;
 	}
 
-	// 3. Default from constants
+	// 4. Default from constants
 	return DEFAULT_MODELS[agentName] ?? DEFAULT_MODELS.default;
 }
 
@@ -102,12 +96,15 @@ export function createAgents(config?: PluginConfig): AgentDefinition[] {
 		agents.push(applyOverrides(architect, config));
 	}
 
-	// 2. Create all SME agents
-	const smeAgents = createAllSMEAgents(getModel, getPrompts);
-	for (const sme of smeAgents) {
-		if (!isAgentDisabled(sme.name, config)) {
-			agents.push(applyOverrides(sme, config));
-		}
+	// 2. Create unified SME agent
+	if (!isAgentDisabled('sme', config)) {
+		const smePrompts = getPrompts('sme');
+		const sme = createUnifiedSMEAgent(
+			getModel('sme'),
+			smePrompts.prompt,
+			smePrompts.appendPrompt
+		);
+		agents.push(applyOverrides(sme, config));
 	}
 
 	// 3. Create pipeline agents (coder, security_reviewer, auditor, test_engineer)
@@ -188,4 +185,4 @@ export { createCoderAgent } from './coder';
 export { createSecurityReviewerAgent } from './security-reviewer';
 export { createAuditorAgent } from './auditor';
 export { createTestEngineerAgent } from './test-engineer';
-export { createAllSMEAgents, createSMEAgent, listDomains } from './sme';
+export { createUnifiedSMEAgent, AVAILABLE_DOMAINS } from './sme-unified';
