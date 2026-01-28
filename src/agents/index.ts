@@ -2,17 +2,18 @@ import type { AgentConfig as SDKAgentConfig } from '@opencode-ai/sdk';
 import {
 	CATEGORY_PREFIXES,
 	DEFAULT_MODELS,
-	QA_AGENTS,
 	isQAAgent,
+	isSMEAgent,
 	isSubagent,
 } from '../config/constants';
 import { loadAgentPrompt, type PluginConfig } from '../config';
 import { type AgentDefinition, createArchitectAgent } from './architect';
 import { createAuditorAgent } from './auditor';
 import { createCoderAgent } from './coder';
+import { createReaderAgent } from './reader';
 import { createSecurityReviewerAgent } from './security-reviewer';
 import { createTestEngineerAgent } from './test-engineer';
-import { createUnifiedSMEAgent } from './sme-unified';
+import { createAllSMEAgents } from './sme';
 
 export type { AgentDefinition } from './architect';
 
@@ -25,7 +26,7 @@ function getModelForAgent(agentName: string, config?: PluginConfig): string {
 	if (explicit) return explicit;
 
 	// 2. Check category default for SME
-	if (agentName === 'sme') {
+	if (isSMEAgent(agentName)) {
 		const categoryModel = config?.agents?.[CATEGORY_PREFIXES.sme]?.model;
 		if (categoryModel) return categoryModel;
 		return DEFAULT_MODELS._sme;
@@ -96,18 +97,26 @@ export function createAgents(config?: PluginConfig): AgentDefinition[] {
 		agents.push(applyOverrides(architect, config));
 	}
 
-	// 2. Create unified SME agent
-	if (!isAgentDisabled('sme', config)) {
-		const smePrompts = getPrompts('sme');
-		const sme = createUnifiedSMEAgent(
-			getModel('sme'),
-			smePrompts.prompt,
-			smePrompts.appendPrompt
+	// 2. Create Reader (fast data processing)
+	if (!isAgentDisabled('reader', config)) {
+		const readerPrompts = getPrompts('reader');
+		const reader = createReaderAgent(
+			getModel('reader'),
+			readerPrompts.prompt,
+			readerPrompts.appendPrompt
 		);
-		agents.push(applyOverrides(sme, config));
+		agents.push(applyOverrides(reader, config));
 	}
 
-	// 3. Create pipeline agents (coder, security_reviewer, auditor, test_engineer)
+	// 3. Create all SME agents
+	const smeAgents = createAllSMEAgents(getModel, getPrompts);
+	for (const sme of smeAgents) {
+		if (!isAgentDisabled(sme.name, config)) {
+			agents.push(applyOverrides(sme, config));
+		}
+	}
+
+	// 4. Create pipeline agents (coder, security_reviewer, auditor, test_engineer)
 	if (!isAgentDisabled('coder', config)) {
 		const coderPrompts = getPrompts('coder');
 		const coder = createCoderAgent(
@@ -182,7 +191,8 @@ export function getAgentConfigs(
 // Re-export agent types
 export { createArchitectAgent } from './architect';
 export { createCoderAgent } from './coder';
+export { createReaderAgent } from './reader';
 export { createSecurityReviewerAgent } from './security-reviewer';
 export { createAuditorAgent } from './auditor';
 export { createTestEngineerAgent } from './test-engineer';
-export { createUnifiedSMEAgent, AVAILABLE_DOMAINS } from './sme-unified';
+export { createAllSMEAgents, createSMEAgent, listDomains } from './sme';

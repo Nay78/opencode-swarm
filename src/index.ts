@@ -2,7 +2,7 @@ import type { Plugin } from '@opencode-ai/plugin';
 import { getAgentConfigs } from './agents';
 import { loadPluginConfig } from './config';
 import { createPipelineTrackerHook } from './hooks';
-import { detect_domains, extract_code_blocks } from './tools';
+import { detect_domains, extract_code_blocks, gitingest } from './tools';
 import { log } from './utils';
 
 /**
@@ -37,6 +37,7 @@ const OpenCodeSwarm: Plugin = async (ctx) => {
 		tool: {
 			detect_domains,
 			extract_code_blocks,
+			gitingest,
 		},
 
 		// Configure OpenCode - merge agents into config

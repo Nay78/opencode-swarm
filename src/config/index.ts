@@ -7,9 +7,10 @@ export {
 	ORCHESTRATOR_NAME,
 	PIPELINE_AGENTS,
 	QA_AGENTS,
-	SME_AGENT,
+	SME_AGENTS,
 	domainToAgentName,
 	isQAAgent,
+	isSMEAgent,
 	isSubagent,
 } from './constants';
 
