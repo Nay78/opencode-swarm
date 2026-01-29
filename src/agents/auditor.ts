@@ -67,6 +67,12 @@ export function createAuditorAgent(
 			model,
 			temperature: 0.1,
 			prompt,
+			// Auditors are read-only - they analyze and report, never modify
+			tools: {
+				write: false,
+				edit: false,
+				patch: false,
+			},
 		},
 	};
 }

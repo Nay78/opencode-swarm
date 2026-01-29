@@ -15,7 +15,7 @@ export const SME_AGENTS = [
 
 export const QA_AGENTS = ['security_reviewer', 'auditor'] as const;
 
-export const PIPELINE_AGENTS = ['reader', 'coder', 'test_engineer'] as const;
+export const PIPELINE_AGENTS = ['explorer', 'coder', 'test_engineer'] as const;
 
 export const ORCHESTRATOR_NAME = 'architect' as const;
 
@@ -47,8 +47,8 @@ export const DEFAULT_MODELS: Record<string, string> = {
 	// Orchestrator
 	architect: 'anthropic/claude-sonnet-4-5',
 
-	// Fast reader agent (use cheap/fast model)
-	reader: 'google/gemini-2.0-flash',
+	// Fast explorer agent (use cheap/fast model)
+	explorer: 'google/gemini-2.0-flash',
 
 	// Pipeline agents
 	coder: 'anthropic/claude-sonnet-4-5',

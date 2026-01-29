@@ -13,7 +13,7 @@ export declare function createAgents(config?: PluginConfig): AgentDefinition[];
 export declare function getAgentConfigs(config?: PluginConfig): Record<string, SDKAgentConfig>;
 export { createArchitectAgent } from './architect';
 export { createCoderAgent } from './coder';
-export { createReaderAgent } from './reader';
+export { createExplorerAgent } from './explorer';
 export { createSecurityReviewerAgent } from './security-reviewer';
 export { createAuditorAgent } from './auditor';
 export { createTestEngineerAgent } from './test-engineer';

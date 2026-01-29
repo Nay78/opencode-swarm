@@ -1,207 +1,236 @@
 # Installation Guide
 
-## Prerequisites
+## Quick Start
 
-- [Bun](https://bun.sh/) runtime (for running the installer)
-- [OpenCode](https://opencode.ai/) CLI installed and authenticated
+### 1. Add to OpenCode Configuration
 
-## Quick Install
+Edit your `opencode.json`:
+
+```json
+{
+  "plugin": ["opencode-swarm"]
+}
+```
+
+### 2. Install Dependencies
 
 ```bash
 bunx opencode-swarm install
 ```
 
-This will:
-1. Add `opencode-swarm` to your OpenCode plugins
-2. Create a default configuration file
-3. Set up the custom prompts directory
-
-## Manual Installation
-
-If you prefer manual setup:
-
-### 1. Install the package globally
-
-```bash
-bun add -g opencode-swarm
-```
-
-### 2. Add to OpenCode config
-
-Edit `~/.config/opencode/config.json`:
-
-```json
-{
-  "plugins": ["opencode-swarm"]
-}
-```
-
-### 3. Create plugin config
+### 3. Create Configuration (Optional)
 
 Create `~/.config/opencode/opencode-swarm.json`:
 
 ```json
 {
-  "preset": "remote",
-  "swarm_mode": "remote",
-  "max_iterations": 5
+  "agents": {
+    "architect": { "model": "anthropic/claude-sonnet-4-5" },
+    "explorer": { "model": "google/gemini-2.0-flash" },
+    "coder": { "model": "anthropic/claude-sonnet-4-5" },
+    "_sme": { "model": "google/gemini-2.0-flash" },
+    "_qa": { "model": "google/gemini-2.0-flash" },
+    "test_engineer": { "model": "google/gemini-2.0-flash" }
+  }
 }
 ```
+
+### 4. Start OpenCode
+
+```bash
+opencode
+```
+
+---
 
 ## Configuration Options
 
-### Presets
+### Model Assignment
 
-Presets define model assignments for all agents. The plugin includes two built-in presets:
-
-**remote** - Uses cloud-based models:
-```json
-{
-  "architect": { "model": "anthropic/claude-sonnet-4.5" },
-  "coder": { "model": "openai/gpt-5.2-codex" },
-  "_sme": { "model": "google/gemini-3-flash" },
-  "_qa": { "model": "google/gemini-3-flash" },
-  "test_engineer": { "model": "google/gemini-3-flash" }
-}
-```
-
-**hybrid** - Uses local inference for SME/QA:
-```json
-{
-  "architect": { "model": "anthropic/claude-sonnet-4.5" },
-  "coder": { "model": "ollama/qwen3:72b" },
-  "_sme": { "model": "npu/qwen3:14b" },
-  "_qa": { "model": "npu/qwen3:14b" },
-  "test_engineer": { "model": "npu/qwen3:14b" }
-}
-```
-
-### Local Inference Setup
-
-For hybrid mode with local models:
+Each agent can use a different model:
 
 ```json
 {
-  "swarm_mode": "hybrid",
-  "gpu_url": "http://192.168.1.100:1234/v1",
-  "gpu_model": "qwen3:72b",
-  "npu_url": "http://localhost:11435/v1",
-  "npu_model": "qwen3:14b"
+  "agents": {
+    "architect": { "model": "anthropic/claude-sonnet-4-5" },
+    "explorer": { "model": "google/gemini-2.0-flash" },
+    "coder": { "model": "anthropic/claude-sonnet-4-5" }
+  }
 }
 ```
 
-The `ollama/` and `npu/` prefixes in model names tell the plugin to use local endpoints.
+### Category Defaults
 
-### Category Model Defaults
+Use `_sme` and `_qa` prefixes to set defaults for all agents in a category:
 
-Use underscore-prefixed keys to set defaults for agent categories:
+```json
+{
+  "agents": {
+    "_sme": { "model": "google/gemini-2.0-flash" },
+    "_qa": { "model": "openai/gpt-4o" }
+  }
+}
+```
 
-| Key | Applies To |
-|-----|------------|
-| `_sme` | All 11 SME agents |
-| `_qa` | `security_reviewer`, `auditor` |
+Individual agents override category defaults:
 
-Individual agent overrides take priority over category defaults.
+```json
+{
+  "agents": {
+    "_sme": { "model": "google/gemini-2.0-flash" },
+    "sme_security": { "model": "anthropic/claude-sonnet-4-5" }
+  }
+}
+```
 
 ### Disabling Agents
 
-To disable specific agents:
+Disable SMEs you don't need:
 
 ```json
 {
   "agents": {
-    "sme_ui_ux": { "disabled": true },
-    "sme_vmware": { "disabled": true }
+    "sme_vmware": { "disabled": true },
+    "sme_azure": { "disabled": true },
+    "sme_ui_ux": { "disabled": true }
   }
 }
 ```
 
-### Temperature Overrides
+### Temperature Override
+
+Adjust agent creativity:
 
 ```json
 {
   "agents": {
-    "coder": { "temperature": 0.1 },
-    "architect": { "temperature": 0.2 }
+    "coder": { 
+      "model": "anthropic/claude-sonnet-4-5",
+      "temperature": 0.2
+    }
   }
 }
 ```
+
+---
 
 ## Custom Prompts
 
-Place markdown files in `~/.config/opencode/opencode-swarm/`:
+Override or extend default agent prompts.
 
-### Replace Default Prompt
+### Location
 
-Create `{agent}.md` to completely replace an agent's prompt:
+Place files in `~/.config/opencode/opencode-swarm/`:
+
+### Full Replacement
+
+Create `{agent}.md` to completely replace the default prompt:
 
 ```
 ~/.config/opencode/opencode-swarm/architect.md
 ```
 
-### Append to Default Prompt
+### Append Mode
 
-Create `{agent}_append.md` to add instructions:
+Create `{agent}_append.md` to add instructions to the default prompt:
 
 ```
-~/.config/opencode/opencode-swarm/coder_append.md
+~/.config/opencode/opencode-swarm/architect_append.md
 ```
 
-Example `coder_append.md`:
+### Example: Custom Architect Instructions
+
+`~/.config/opencode/opencode-swarm/architect_append.md`:
+
 ```markdown
-## Additional Requirements
+## Additional Guidelines
 
-- Always use strict mode in PowerShell
-- Include verbose logging for debugging
-- Follow our internal coding standards at /docs/standards.md
+- Always check for .editorconfig before suggesting formatting changes
+- Prefer TypeScript over JavaScript for new files
+- Run `npm test` after any code changes
 ```
 
-## Project-Level Configuration
+---
 
-You can override settings per-project by creating:
+## Local Model Configuration
+
+### Using Ollama
+
+```json
+{
+  "agents": {
+    "architect": { "model": "anthropic/claude-sonnet-4-5" },
+    "_sme": { "model": "ollama/qwen2.5:32b" },
+    "_qa": { "model": "ollama/qwen2.5:32b" }
+  }
+}
+```
+
+### Using LM Studio
+
+```json
+{
+  "agents": {
+    "_sme": { "model": "lmstudio/local-model" }
+  }
+}
+```
+
+### Hybrid Setup
+
+Mix cloud and local models:
+
+```json
+{
+  "agents": {
+    "architect": { "model": "anthropic/claude-sonnet-4-5" },
+    "explorer": { "model": "ollama/qwen2.5:14b" },
+    "coder": { "model": "anthropic/claude-sonnet-4-5" },
+    "_sme": { "model": "ollama/qwen2.5:14b" },
+    "_qa": { "model": "ollama/qwen2.5:32b" },
+    "test_engineer": { "model": "ollama/qwen2.5:14b" }
+  }
+}
+```
+
+---
+
+## Verification
+
+After installation, verify agents are loaded:
 
 ```
-<project>/.opencode/opencode-swarm.json
+opencode
+> ping architect
+> ping explorer
+> ping sme_powershell
 ```
 
-Project config is deep-merged with user config, with project taking precedence.
+Or list all available agents in the OpenCode UI.
+
+---
 
 ## Troubleshooting
 
-### Plugin not loading
+### Plugin Not Loading
 
-1. Check OpenCode config includes the plugin:
-   ```bash
-   cat ~/.config/opencode/config.json | grep opencode-swarm
-   ```
+1. Check `opencode.json` has the plugin listed
+2. Clear cache: `rm -rf ~/.cache/opencode/node_modules/opencode-swarm`
+3. Reinstall: `bunx opencode-swarm install`
 
-2. Verify the package is installed:
-   ```bash
-   bun pm ls -g | grep opencode-swarm
-   ```
+### Agent Not Appearing
 
-### Models not found
+1. Verify config file syntax (valid JSON)
+2. Check agent isn't disabled
+3. Ensure model string is valid for your provider
 
-Ensure your OpenCode authentication covers the models you're using:
-```bash
-opencode auth login
-```
+### Model Errors
 
-### Local inference not working
+1. Verify API keys are configured for the provider
+2. Check model name matches provider's naming convention
+3. Test with a known-working model first
 
-1. Verify endpoints are accessible:
-   ```bash
-   curl http://localhost:11435/v1/models
-   ```
-
-2. Check the model names match your local setup
-
-### Debug mode
-
-Enable verbose logging:
-```bash
-OPENCODE_SWARM_DEBUG=1 opencode
-```
+---
 
 ## Updating
 
@@ -209,4 +238,9 @@ OPENCODE_SWARM_DEBUG=1 opencode
 bunx opencode-swarm@latest install
 ```
 
-This preserves your existing configuration while updating the plugin.
+Clear cache if issues persist:
+
+```bash
+rm -rf ~/.cache/opencode/node_modules/opencode-swarm
+bunx opencode-swarm@latest install
+```

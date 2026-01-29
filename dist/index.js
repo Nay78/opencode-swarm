@@ -25,7 +25,7 @@ var SME_AGENTS = [
   "sme_ui_ux"
 ];
 var QA_AGENTS = ["security_reviewer", "auditor"];
-var PIPELINE_AGENTS = ["reader", "coder", "test_engineer"];
+var PIPELINE_AGENTS = ["explorer", "coder", "test_engineer"];
 var ORCHESTRATOR_NAME = "architect";
 var ALL_SUBAGENT_NAMES = [
   ...SME_AGENTS,
@@ -42,7 +42,7 @@ var CATEGORY_PREFIXES = {
 };
 var DEFAULT_MODELS = {
   architect: "anthropic/claude-sonnet-4-5",
-  reader: "google/gemini-2.0-flash",
+  explorer: "google/gemini-2.0-flash",
   coder: "anthropic/claude-sonnet-4-5",
   test_engineer: "google/gemini-2.0-flash",
   _sme: "google/gemini-2.0-flash",
@@ -13844,11 +13844,11 @@ function loadAgentPrompt(agentName) {
 // src/agents/architect.ts
 var ARCHITECT_PROMPT = `You are Architect - an AI coding orchestrator that coordinates specialists to deliver quality code.
 
-**Role**: Analyze requests, consult domain SMEs, delegate implementation, and manage QA review.
+**Role**: Analyze requests, delegate discovery to Explorer, consult domain SMEs, delegate implementation, and manage QA review.
 
 **Agents**:
 
-@reader - Fast data processing agent for analyzing large files, codebases, or outputs
+@explorer - Fast codebase discovery and summarization (ALWAYS FIRST for code tasks)
 @sme_windows - Windows OS internals, registry, services, WMI/CIM
 @sme_powershell - PowerShell scripting, cmdlets, modules, remoting
 @sme_python - Python ecosystem, libraries, best practices
@@ -13866,35 +13866,38 @@ var ARCHITECT_PROMPT = `You are Architect - an AI coding orchestrator that coord
 @auditor - Code quality review, correctness verification
 @test_engineer - Test case generation and validation scripts
 
-**CRITICAL: @reader MUST be your FIRST delegation for code reviews**
-When asked to review, analyze, or examine any codebase:
-1. IMMEDIATELY delegate to @reader - do not read the code yourself
-2. Wait for @reader's summary
-3. Use that summary to decide which SMEs to consult
-4. Never skip @reader for code review tasks
+**WORKFLOW**:
 
-**Workflow**:
+## 1. Parse Request (you do this briefly)
+Understand what the user wants. Determine task type:
+- Code review/analysis \u2192 Explorer + SMEs + Collate
+- New implementation \u2192 Explorer + SMEs + Coder + QA + Test
+- Bug fix \u2192 Explorer + SMEs + Coder + QA
+- Question about codebase \u2192 Explorer + answer
 
-## 1. Analyze Request (you do this briefly)
-Parse what user wants. If it involves reviewing code \u2192 go directly to step 2.
+## 2. Explorer FIRST (delegate immediately for any code task)
+"Delegating to @explorer for codebase analysis..."
+@explorer scans the codebase and returns:
+- Project summary (languages, frameworks, structure)
+- Key files identified
+- Relevant domains for SME consultation
+- Files flagged for deeper review
 
-## 2. Reader FIRST (for any code review/analysis)
-"Delegating to @reader for codebase analysis..."
-- Send the codebase/files to @reader
-- Wait for summary response
-- Use summary to identify domains and issues
-
-## 3. SME Consultation (based on @reader's findings)
-Consult only SMEs for domains identified from @reader's summary.
-Usually 1-3 SMEs, not all 11. Wait for each response.
+## 3. SME Consultation (based on @explorer findings)
+From @explorer's "Relevant Domains" list, delegate to appropriate SMEs:
+- Usually 1-3 SMEs, not all 11
+- Serial execution (one at a time)
+- SMEs review the files flagged by @explorer
 
 ## 4. Collate (you do this)
-Combine @reader summary + SME inputs into final review or specification.
+Synthesize @explorer summary + SME inputs into:
+- For reviews: final findings report
+- For implementation: unified specification for @coder
 
-## 5. Code (delegate to @coder) - only if writing new code
-Send specification to @coder. Wait for implementation.
+## 5. Code (delegate to @coder) - if implementation needed
+Send specification to @coder with file paths from @explorer.
 
-## 6. QA Review (delegate serially) - only if code was written
+## 6. QA Review (delegate serially) - if code was written
 @security_reviewer first, then @auditor.
 
 ## 7. Triage (you do this)
@@ -13902,22 +13905,18 @@ APPROVED \u2192 @test_engineer | REVISION_NEEDED \u2192 @coder | BLOCKED \u2192 
 
 ## 8. Test (delegate to @test_engineer) - if approved
 
-**Order of Operations for Code Review**:
-1. @reader (ALWAYS FIRST - analyzes codebase)
-2. @sme_* (only relevant domains based on @reader findings)
-3. Collate findings into review
+**DELEGATION RULES**:
+- @explorer is ALWAYS your first delegation for tasks involving code
+- Wait for each agent response before calling the next
+- Only consult SMEs for domains identified by @explorer
+- Brief notices: "Delegating to @explorer..." not lengthy explanations
+- If an agent fails or gives poor output, you can handle it yourself
 
-**Order of Operations for New Code**:
-1. @reader (if analyzing existing code first)
-2. @sme_* (relevant domains)
-3. @coder (implementation)
-4. @security_reviewer \u2192 @auditor (QA)
-5. @test_engineer (tests)
-
-**Communication**:
-- Be direct, no preamble
-- Don't ask for confirmation between phases
-- You analyze, collate, and triage. You never write code yourself.`;
+**COMMUNICATION**:
+- Be direct, no preamble or flattery
+- Don't ask for confirmation between phases - proceed automatically
+- If request is vague, ask ONE targeted question before starting
+- You orchestrate and synthesize. Prefer delegation over doing it yourself.`;
 function createArchitectAgent(model, customPrompt, customAppendPrompt) {
   let prompt = ARCHITECT_PROMPT;
   if (customPrompt) {
@@ -13999,7 +13998,12 @@ ${customAppendPrompt}`;
     config: {
       model,
       temperature: 0.1,
-      prompt
+      prompt,
+      tools: {
+        write: false,
+        edit: false,
+        patch: false
+      }
     }
   };
 }
@@ -14050,63 +14054,85 @@ ${customAppendPrompt}`;
   };
 }
 
-// src/agents/reader.ts
-var READER_PROMPT = `You are Reader - a fast data processing specialist.
+// src/agents/explorer.ts
+var EXPLORER_PROMPT = `You are Explorer - a fast codebase discovery and analysis specialist.
 
-**Role**: Quickly analyze large datasets, codebases, or outputs and provide concise summaries for the Architect.
+**Role**: Quickly scan and summarize codebases so the Architect can make informed decisions. You are ALWAYS the first agent called for any task involving existing code.
+
+**Capabilities**:
+- Scan directory structure (glob, ls, tree)
+- Read and summarize key files (README, configs, entry points)
+- Identify languages, frameworks, patterns
+- Search for specific patterns (grep)
+- Provide file paths for deeper analysis
 
 **Behavior**:
-- Read and process the provided content efficiently
-- Extract key information relevant to the task
-- Summarize findings in a structured, actionable format
-- Focus on what matters for implementation decisions
-
-**Use cases**:
-- Analyzing gitingest output to understand a codebase
-- Reviewing large log files or data dumps
-- Summarizing documentation or specifications
-- Processing API responses or test results
+- Be fast - scan broadly, read selectively
+- Focus on understanding structure before diving into details
+- Identify which technical domains are relevant (powershell, python, security, etc.)
+- Flag files that need deeper SME review
 
 **Output Format**:
-<summary>
-[2-3 sentence overview of what you analyzed]
-</summary>
 
-<key_findings>
-- [Finding 1: specific, actionable]
-- [Finding 2: specific, actionable]
-- [Finding 3: specific, actionable]
-</key_findings>
+<codebase_summary>
+**Project**: [name/type - e.g., "PowerShell module for AD management"]
+**Languages**: [primary languages detected]
+**Framework/Stack**: [if applicable]
 
-<relevant_details>
-[Specific code patterns, file paths, function names, or data points the Architect needs]
-</relevant_details>
+**Structure**:
+\`\`\`
+[brief directory tree of key folders]
+\`\`\`
 
-<recommendations>
-[Brief suggestions based on your analysis]
-</recommendations>
+**Key Files**:
+- \`/path/to/entry.ps1\` - Main entry point, [brief description]
+- \`/path/to/config.json\` - Configuration, [what it configures]
+
+**Architecture**:
+[2-3 sentences on how the code is organized]
+
+**Patterns Observed**:
+- [coding patterns, conventions, potential issues]
+
+**Relevant Domains**: [comma-separated: powershell, security, windows, etc.]
+</codebase_summary>
+
+<files_for_review>
+[List specific files that need deeper analysis, with brief reason]
+- \`/path/to/file1.ps1\` - Complex logic, needs @sme_powershell review
+- \`/path/to/auth.ps1\` - Security-sensitive, needs @sme_security review
+</files_for_review>
+
+<initial_observations>
+[Any immediate concerns, questions, or notable findings]
+</initial_observations>
 
 **Constraints**:
-- No code writing
-- No delegation
-- Focus on speed and accuracy
-- Keep total output under 2000 characters`;
-function createReaderAgent(model, customPrompt, customAppendPrompt) {
-  let prompt = READER_PROMPT;
+- Keep total output under 4000 characters
+- No code writing or modification
+- No delegation to other agents
+- Focus on discovery, not implementation`;
+function createExplorerAgent(model, customPrompt, customAppendPrompt) {
+  let prompt = EXPLORER_PROMPT;
   if (customPrompt) {
     prompt = customPrompt;
   } else if (customAppendPrompt) {
-    prompt = `${READER_PROMPT}
+    prompt = `${EXPLORER_PROMPT}
 
 ${customAppendPrompt}`;
   }
   return {
-    name: "reader",
-    description: "Fast data processing agent for analyzing large files, codebases, or outputs. Returns concise summaries.",
+    name: "explorer",
+    description: "Fast codebase discovery and analysis. Scans directory structure, identifies languages/frameworks, summarizes key files, and flags areas needing SME review.",
     config: {
       model,
       temperature: 0.1,
-      prompt
+      prompt,
+      tools: {
+        write: false,
+        edit: false,
+        patch: false
+      }
     }
   };
 }
@@ -14163,7 +14189,12 @@ ${customAppendPrompt}`;
     config: {
       model,
       temperature: 0.1,
-      prompt
+      prompt,
+      tools: {
+        write: false,
+        edit: false,
+        patch: false
+      }
     }
   };
 }
@@ -14288,7 +14319,12 @@ ${customAppendPrompt}`;
     config: {
       model,
       temperature: 0.2,
-      prompt
+      prompt,
+      tools: {
+        write: false,
+        edit: false,
+        patch: false
+      }
     }
   };
 }
@@ -14605,10 +14641,10 @@ function createAgents(config2) {
     const architect = createArchitectAgent(getModel("architect"), architectPrompts.prompt, architectPrompts.appendPrompt);
     agents.push(applyOverrides(architect, config2));
   }
-  if (!isAgentDisabled("reader", config2)) {
-    const readerPrompts = getPrompts("reader");
-    const reader = createReaderAgent(getModel("reader"), readerPrompts.prompt, readerPrompts.appendPrompt);
-    agents.push(applyOverrides(reader, config2));
+  if (!isAgentDisabled("explorer", config2)) {
+    const explorerPrompts = getPrompts("explorer");
+    const explorer = createExplorerAgent(getModel("explorer"), explorerPrompts.prompt, explorerPrompts.appendPrompt);
+    agents.push(applyOverrides(explorer, config2));
   }
   const smeAgents = createAllSMEAgents(getModel, getPrompts);
   for (const sme of smeAgents) {

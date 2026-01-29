@@ -10,7 +10,7 @@ import { loadAgentPrompt, type PluginConfig } from '../config';
 import { type AgentDefinition, createArchitectAgent } from './architect';
 import { createAuditorAgent } from './auditor';
 import { createCoderAgent } from './coder';
-import { createReaderAgent } from './reader';
+import { createExplorerAgent } from './explorer';
 import { createSecurityReviewerAgent } from './security-reviewer';
 import { createTestEngineerAgent } from './test-engineer';
 import { createAllSMEAgents } from './sme';
@@ -97,15 +97,15 @@ export function createAgents(config?: PluginConfig): AgentDefinition[] {
 		agents.push(applyOverrides(architect, config));
 	}
 
-	// 2. Create Reader (fast data processing)
-	if (!isAgentDisabled('reader', config)) {
-		const readerPrompts = getPrompts('reader');
-		const reader = createReaderAgent(
-			getModel('reader'),
-			readerPrompts.prompt,
-			readerPrompts.appendPrompt
+	// 2. Create Explorer (fast codebase discovery)
+	if (!isAgentDisabled('explorer', config)) {
+		const explorerPrompts = getPrompts('explorer');
+		const explorer = createExplorerAgent(
+			getModel('explorer'),
+			explorerPrompts.prompt,
+			explorerPrompts.appendPrompt
 		);
-		agents.push(applyOverrides(reader, config));
+		agents.push(applyOverrides(explorer, config));
 	}
 
 	// 3. Create all SME agents
@@ -191,7 +191,7 @@ export function getAgentConfigs(
 // Re-export agent types
 export { createArchitectAgent } from './architect';
 export { createCoderAgent } from './coder';
-export { createReaderAgent } from './reader';
+export { createExplorerAgent } from './explorer';
 export { createSecurityReviewerAgent } from './security-reviewer';
 export { createAuditorAgent } from './auditor';
 export { createTestEngineerAgent } from './test-engineer';

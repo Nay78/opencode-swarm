@@ -77,6 +77,12 @@ export function createSMEAgent(
 			model,
 			temperature: 0.2,
 			prompt,
+			// SMEs are advisory only - can read to analyze, but never write
+			tools: {
+				write: false,
+				edit: false,
+				patch: false,
+			},
 		},
 	};
 }
