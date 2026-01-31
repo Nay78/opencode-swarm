@@ -2,9 +2,9 @@
 
 ## Quick Start
 
-### 1. Add to OpenCode Configuration
+### 1. Add to OpenCode
 
-Edit your `opencode.json`:
+Add to your `opencode.json`:
 
 ```json
 {
@@ -12,13 +12,13 @@ Edit your `opencode.json`:
 }
 ```
 
-### 2. Install Dependencies
+Or install via CLI:
 
 ```bash
 bunx opencode-swarm install
 ```
 
-### 3. Create Configuration (Optional)
+### 2. Configure Models
 
 Create `~/.config/opencode/opencode-swarm.json`:
 
@@ -35,15 +35,27 @@ Create `~/.config/opencode/opencode-swarm.json`:
 }
 ```
 
-### 4. Start OpenCode
+### 3. Start OpenCode
 
 ```bash
 opencode
 ```
 
+### 4. Test It
+
+```
+@architect Review this codebase and suggest improvements
+```
+
+You should see:
+1. Architect checking for `.swarm/plan.md`
+2. Explorer scanning the codebase
+3. SMEs providing domain guidance
+4. A phased plan being created
+
 ---
 
-## Configuration Options
+## Configuration Reference
 
 ### Model Assignment
 
@@ -53,26 +65,33 @@ Each agent can use a different model:
 {
   "agents": {
     "architect": { "model": "anthropic/claude-sonnet-4-5" },
-    "explorer": { "model": "google/gemini-2.0-flash" },
-    "coder": { "model": "anthropic/claude-sonnet-4-5" }
+    "coder": { "model": "anthropic/claude-sonnet-4-5" },
+    "explorer": { "model": "google/gemini-2.0-flash" }
   }
 }
 ```
 
 ### Category Defaults
 
-Use `_sme` and `_qa` prefixes to set defaults for all agents in a category:
+Use prefixes to set defaults for agent categories:
+
+| Prefix | Applies To |
+|--------|-----------|
+| `_sme` | All 15 SME agents |
+| `_qa` | security_reviewer, auditor |
 
 ```json
 {
   "agents": {
     "_sme": { "model": "google/gemini-2.0-flash" },
-    "_qa": { "model": "openai/gpt-4o" }
+    "_qa": { "model": "google/gemini-2.0-flash" }
   }
 }
 ```
 
-Individual agents override category defaults:
+### Override Category Defaults
+
+Specific agent config overrides category defaults:
 
 ```json
 {
@@ -83,31 +102,104 @@ Individual agents override category defaults:
 }
 ```
 
-### Disabling Agents
+Here, `sme_security` uses Claude while all other SMEs use Gemini.
 
-Disable SMEs you don't need:
+### Disable Agents
 
 ```json
 {
   "agents": {
     "sme_vmware": { "disabled": true },
-    "sme_azure": { "disabled": true },
-    "sme_ui_ux": { "disabled": true }
+    "sme_oracle": { "disabled": true }
   }
 }
 ```
 
-### Temperature Override
+### Temperature
 
-Adjust agent creativity:
+Adjust creativity/determinism per agent:
 
 ```json
 {
   "agents": {
-    "coder": { 
-      "model": "anthropic/claude-sonnet-4-5",
-      "temperature": 0.2
-    }
+    "architect": { "model": "...", "temperature": 0.1 },
+    "coder": { "model": "...", "temperature": 0.2 }
+  }
+}
+```
+
+Lower (0.0-0.2) = more deterministic, better for code
+Higher (0.5-0.8) = more creative, better for brainstorming
+
+---
+
+## Recommended Configurations
+
+### Budget-Conscious
+
+Use expensive models only where it matters:
+
+```json
+{
+  "agents": {
+    "architect": { "model": "anthropic/claude-sonnet-4-5" },
+    "coder": { "model": "anthropic/claude-sonnet-4-5" },
+    "explorer": { "model": "google/gemini-2.0-flash" },
+    "_sme": { "model": "google/gemini-2.0-flash" },
+    "_qa": { "model": "google/gemini-2.0-flash" },
+    "test_engineer": { "model": "google/gemini-2.0-flash" }
+  }
+}
+```
+
+### Maximum Diversity
+
+Different vendors catch different bugs:
+
+```json
+{
+  "agents": {
+    "architect": { "model": "anthropic/claude-sonnet-4-5" },
+    "coder": { "model": "anthropic/claude-sonnet-4-5" },
+    "explorer": { "model": "google/gemini-2.0-flash" },
+    "_sme": { "model": "google/gemini-2.0-flash" },
+    "security_reviewer": { "model": "openai/gpt-4o" },
+    "auditor": { "model": "google/gemini-2.0-flash" },
+    "test_engineer": { "model": "openai/gpt-4o-mini" }
+  }
+}
+```
+
+### Local + Cloud Hybrid
+
+Use local models for high-volume agents:
+
+```json
+{
+  "agents": {
+    "architect": { "model": "anthropic/claude-sonnet-4-5" },
+    "coder": { "model": "anthropic/claude-sonnet-4-5" },
+    "explorer": { "model": "ollama/qwen2.5:14b" },
+    "_sme": { "model": "ollama/qwen2.5:14b" },
+    "_qa": { "model": "ollama/qwen2.5:14b" },
+    "test_engineer": { "model": "ollama/qwen2.5:14b" }
+  }
+}
+```
+
+### All-Claude (Enterprise)
+
+Single vendor, premium quality:
+
+```json
+{
+  "agents": {
+    "architect": { "model": "anthropic/claude-sonnet-4-5" },
+    "coder": { "model": "anthropic/claude-sonnet-4-5" },
+    "explorer": { "model": "anthropic/claude-haiku" },
+    "_sme": { "model": "anthropic/claude-haiku" },
+    "_qa": { "model": "anthropic/claude-sonnet-4-5" },
+    "test_engineer": { "model": "anthropic/claude-haiku" }
   }
 }
 ```
@@ -116,131 +208,112 @@ Adjust agent creativity:
 
 ## Custom Prompts
 
-Override or extend default agent prompts.
+Override or extend agent prompts.
 
-### Location
+### Directory
 
-Place files in `~/.config/opencode/opencode-swarm/`:
+Place custom prompts in:
+```
+~/.config/opencode/opencode-swarm/
+```
 
-### Full Replacement
+### Replace Entire Prompt
 
-Create `{agent}.md` to completely replace the default prompt:
-
+Create `{agent}.md`:
 ```
 ~/.config/opencode/opencode-swarm/architect.md
 ```
 
-### Append Mode
+### Append to Default
 
-Create `{agent}_append.md` to add instructions to the default prompt:
-
+Create `{agent}_append.md`:
 ```
 ~/.config/opencode/opencode-swarm/architect_append.md
 ```
 
-### Example: Custom Architect Instructions
+### Example: Add Custom Guidelines
 
 `~/.config/opencode/opencode-swarm/architect_append.md`:
-
 ```markdown
-## Additional Guidelines
+## Additional Project Guidelines
 
-- Always check for .editorconfig before suggesting formatting changes
-- Prefer TypeScript over JavaScript for new files
-- Run `npm test` after any code changes
+- All code must be HIPAA compliant
+- Use PowerShell 7+ syntax only
+- Include verbose logging with -Verbose support
+- Follow company naming conventions: Verb-CompanyNoun
 ```
 
 ---
 
-## Local Model Configuration
+## Project Files
 
-### Using Ollama
+Swarm creates a `.swarm/` directory in your project:
 
-```json
-{
-  "agents": {
-    "architect": { "model": "anthropic/claude-sonnet-4-5" },
-    "_sme": { "model": "ollama/qwen2.5:32b" },
-    "_qa": { "model": "ollama/qwen2.5:32b" }
-  }
-}
+```
+.swarm/
+├── plan.md        # Phased roadmap with tasks
+├── context.md     # Project knowledge, SME cache
+└── history/       # Archived phase summaries
 ```
 
-### Using LM Studio
+### Should I Commit These?
 
-```json
-{
-  "agents": {
-    "_sme": { "model": "lmstudio/local-model" }
-  }
-}
+**Yes.** These files are:
+- Human-readable documentation
+- Useful for onboarding
+- Part of project history
+
+Add to `.gitignore` if you prefer not to track:
 ```
-
-### Hybrid Setup
-
-Mix cloud and local models:
-
-```json
-{
-  "agents": {
-    "architect": { "model": "anthropic/claude-sonnet-4-5" },
-    "explorer": { "model": "ollama/qwen2.5:14b" },
-    "coder": { "model": "anthropic/claude-sonnet-4-5" },
-    "_sme": { "model": "ollama/qwen2.5:14b" },
-    "_qa": { "model": "ollama/qwen2.5:32b" },
-    "test_engineer": { "model": "ollama/qwen2.5:14b" }
-  }
-}
+.swarm/
 ```
 
 ---
 
-## Verification
+## Resuming Projects
 
-After installation, verify agents are loaded:
+Swarm automatically resumes projects:
 
+1. Architect checks for `.swarm/plan.md`
+2. If found, reads current phase and task
+3. Continues from where it left off
+
+To start fresh:
+```bash
+rm -rf .swarm/
 ```
-opencode
-> ping architect
-> ping explorer
-> ping sme_powershell
-```
-
-Or list all available agents in the OpenCode UI.
 
 ---
 
 ## Troubleshooting
 
-### Plugin Not Loading
+### Agents Not Loading
 
-1. Check `opencode.json` has the plugin listed
-2. Clear cache: `rm -rf ~/.cache/opencode/node_modules/opencode-swarm`
-3. Reinstall: `bunx opencode-swarm install`
+1. Verify plugin in `opencode.json`
+2. Check config JSON syntax
+3. Restart OpenCode
 
-### Agent Not Appearing
+### Wrong Model Used
 
-1. Verify config file syntax (valid JSON)
-2. Check agent isn't disabled
-3. Ensure model string is valid for your provider
+1. Check for typos in model names
+2. Verify category defaults vs specific overrides
+3. Specific config always overrides `_sme` / `_qa`
 
-### Model Errors
+### SMEs Not Being Called
 
-1. Verify API keys are configured for the provider
-2. Check model name matches provider's naming convention
-3. Test with a known-working model first
+1. Check if domain is disabled
+2. Verify Explorer is detecting relevant domains
+3. Check context.md for cached guidance (may be skipping)
 
----
+### Plan Not Created
 
-## Updating
+1. Ensure Architect has write permissions
+2. Check for `.swarm/` directory creation
+3. Review Architect output for errors
 
-```bash
-bunx opencode-swarm@latest install
-```
+### Tasks Failing Repeatedly
 
-Clear cache if issues persist:
-
-```bash
-rm -rf ~/.cache/opencode/node_modules/opencode-swarm
-bunx opencode-swarm@latest install
-```
+1. Check plan.md for attempt history
+2. Review rejection reasons
+3. Consider re-scoping task
+4. May need clearer acceptance criteria

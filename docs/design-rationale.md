@@ -1,182 +1,292 @@
-# Design Rationale: Heterogeneous Models & Structured Orchestration
+# Design Rationale
 
-## The Problem with Homogeneous Agent Systems
+## Why OpenCode Swarm Exists
 
-Most multi-agent frameworks use the same model for all roles:
+Every multi-agent framework promises autonomous coding. None deliver.
 
-```
-Planner    → GPT-4
-Researcher → GPT-4
-Coder      → GPT-4
-Reviewer   → GPT-4
-```
+The fundamental problem: **LLMs are stateless, impatient, and overconfident**. Without structure, they:
+- Start coding before understanding requirements
+- Lose context mid-project
+- Build on broken foundations
+- Produce code that "works" but fails in production
 
-This creates **correlated failure modes**:
-- If GPT-4 hallucinates an API, it hallucinates it everywhere
-- If GPT-4 has a blind spot, no agent catches it
-- Errors compound rather than get caught
+Swarm adds the discipline that LLMs lack.
 
 ---
 
-## OpenCode Swarm Approach
+## Core Design Decisions
 
-### Heterogeneous Model Assignment
+### 1. Serial Execution (Not Parallel)
 
-Each role uses the model best suited to its cognitive function:
+**The temptation**: Run agents in parallel for speed.
 
-| Role | Cognitive Need | Model Choice |
-|------|---------------|--------------|
-| Architect | Deep reasoning, synthesis | Large reasoning model |
-| Explorer | Fast scanning, pattern recognition | Fast/cheap model |
-| SMEs | Domain recall, quick advice | Fast/cheap model |
-| Coder | Implementation accuracy | Strong coding model |
-| QA | Adversarial analysis | Different model family |
-| Test | Coverage generation | Fast/cheap model |
+**The reality**: Parallel agents cause:
+- Race conditions (two agents modify same file)
+- Context drift (Agent A assumes X, Agent B assumes Y)
+- Conflict resolution hell
+- Non-reproducible results
 
-### Example Configuration
+**Swarm's approach**: One agent at a time. Always.
+
+```
+WRONG:  Agent1 ──┐
+        Agent2 ──┼── Merge conflicts, inconsistencies
+        Agent3 ──┘
+
+RIGHT:  Agent1 → Agent2 → Agent3 → Consistent result
+```
+
+Slower? Yes. Working code? Also yes.
+
+---
+
+### 2. Phased Planning (Not Ad-Hoc)
+
+**The temptation**: Let the LLM figure out what to do.
+
+**The reality**: Without a plan, LLMs:
+- Jump into coding without understanding scope
+- Miss requirements
+- Build the wrong thing confidently
+- Can't estimate effort
+
+**Swarm's approach**: Mandatory planning phase.
+
+```markdown
+## Phase 1: Foundation [3 tasks, SMALL]
+## Phase 2: Core Logic [5 tasks, MEDIUM]  
+## Phase 3: Integration [4 tasks, MEDIUM]
+## Phase 4: Polish [3 tasks, SMALL]
+```
+
+Every task has:
+- Clear description
+- Acceptance criteria
+- Dependencies
+- Complexity estimate
+
+The Architect can't code until the plan exists.
+
+---
+
+### 3. Persistent Memory (Not Session-Based)
+
+**The temptation**: Keep everything in context window.
+
+**The reality**: Context windows:
+- Have limits
+- Get compacted (losing information)
+- Reset between sessions
+- Can't be shared
+
+**Swarm's approach**: `.swarm/` directory with markdown files.
+
+```
+.swarm/
+├── plan.md      # What we're building, what's done
+├── context.md   # Technical decisions, SME guidance
+└── history/     # Archived phase summaries
+```
+
+Benefits:
+- **Resumable**: Pick up any project instantly
+- **Transferable**: New Architect reads files, continues work
+- **Auditable**: See what was decided and why
+- **Cacheable**: SME guidance doesn't need re-asking
+
+---
+
+### 4. QA Per Task (Not Per Project)
+
+**The temptation**: QA at the end, ship faster.
+
+**The reality**: End-of-project QA means:
+- Bugs compound (Task 3 builds on buggy Task 2)
+- Context is lost (what was Task 1 supposed to do?)
+- Massive rework
+- "It worked on my machine"
+
+**Swarm's approach**: Every task goes through QA.
+
+```
+Task → Coder → Security Review → Audit → Tests → ✓ Complete
+```
+
+If QA rejects:
+- Immediate feedback
+- Fix while context is fresh
+- Don't build on broken foundation
+
+---
+
+### 5. One Task at a Time (Not Batched)
+
+**The temptation**: Send multiple tasks to Coder for efficiency.
+
+**The reality**: Batched tasks cause:
+- Context overload
+- Quality degradation
+- Unclear failures (which task broke?)
+- Coder cuts corners
+
+**Swarm's approach**: One task per Coder delegation.
+
+```
+WRONG:  "Implement auth, sessions, and API endpoints"
+RIGHT:  "Implement login endpoint. Acceptance: Returns JWT on valid credentials."
+```
+
+Focused task = focused code.
+
+---
+
+### 6. Heterogeneous Models (Not Single Model)
+
+**The temptation**: Use your best model everywhere.
+
+**The reality**: Same model = correlated failures.
+- Claude has Claude blindspots
+- GPT has GPT blindspots
+- If the same model writes and reviews, it misses its own mistakes
+
+**Swarm's approach**: Different models for different roles.
 
 ```json
 {
-  "agents": {
-    "architect": { "model": "anthropic/claude-sonnet-4-5" },
-    "explorer": { "model": "google/gemini-2.0-flash" },
-    "_sme": { "model": "google/gemini-2.0-flash" },
-    "coder": { "model": "anthropic/claude-sonnet-4-5" },
-    "_qa": { "model": "openai/gpt-4o" },
-    "test_engineer": { "model": "google/gemini-2.0-flash" }
-  }
+  "coder": "anthropic/claude-sonnet-4-5",
+  "security_reviewer": "openai/gpt-4o",
+  "auditor": "google/gemini-2.0-flash"
 }
 ```
 
----
-
-## Benefits
-
-### 1. Independent Perspectives
-
-Different model families have different:
-- Training data distributions
-- Reasoning patterns
-- Blind spots and biases
-
-When Claude writes code and GPT-4o reviews it, genuine issues get caught.
-
-### 2. Early Disagreement Detection
-
-If the Architect (Claude) and Security Reviewer (GPT) disagree, that's a signal to investigate—not a bug.
-
-### 3. Reduced Hallucination Reinforcement
-
-Homogeneous systems:
-```
-Model A hallucinates → Model A doesn't catch it → Error propagates
-```
-
-Heterogeneous systems:
-```
-Model A hallucinates → Model B catches it → Error stopped
-```
-
-### 4. Cost Optimization
-
-Not every task needs the most expensive model:
-
-| Task | Complexity | Model Choice |
-|------|------------|--------------|
-| Scan directory | Low | Gemini Flash (cheap) |
-| Provide domain advice | Medium | Gemini Flash |
-| Architect decisions | High | Claude Sonnet (expensive) |
-| Write production code | High | Claude Sonnet |
-| Generate tests | Medium | Gemini Flash |
-
-### 5. Latency Optimization
-
-Fast models for discovery and consultation, slow/thorough models for critical decisions:
-
-```
-Explorer (fast) → SMEs (fast) → Architect (thorough) → Coder (thorough) → QA (thorough)
-```
+Why this works:
+- Different training data = different blindspots
+- GPT catches what Claude misses
+- Like having reviewers from different backgrounds
 
 ---
 
-## Real-World Engineering Analogy
+### 7. SME Caching (Not Re-Asking)
 
-This mirrors how real engineering teams work:
+**The temptation**: Consult SMEs whenever uncertain.
 
-| Role | Human Equivalent |
-|------|------------------|
-| Architect | Tech Lead / Principal Engineer |
-| Explorer | Junior dev doing initial research |
-| SMEs | Domain specialists consulted as needed |
-| Coder | Senior developer implementing |
-| Security Reviewer | Security team audit |
-| Auditor | Code review from peer |
-| Test Engineer | QA engineer |
+**The reality**: Re-asking SMEs:
+- Wastes tokens
+- May get different answers
+- Slows down execution
+- Loses continuity
 
-You wouldn't have the same person do all these roles—diversity of perspective improves outcomes.
+**Swarm's approach**: Cache SME guidance in context.md.
 
----
+```markdown
+## SME Guidance Cache
 
-## Why Not Parallel Execution?
+### Security (Phase 1)
+- Use bcrypt with cost factor 12
+- Never log tokens
+- Implement rate limiting
 
-Some frameworks parallelize everything for speed. We chose serial execution because:
+### API (Phase 1)  
+- Return 401 for auth failures
+- Use RFC 7807 for errors
+```
 
-### Parallel Problems
-- **Context races**: Multiple agents read same files, get different snapshots
-- **Conflicting advice**: SMEs disagree, no clear resolution
-- **Debugging nightmare**: "Which agent caused this?"
-- **Resource spikes**: All agents hitting APIs simultaneously
-
-### Serial Benefits
-- **Deterministic**: Same input → same execution path
-- **Traceable**: Clear chain of custody for decisions
-- **Debuggable**: Step through agent-by-agent
-- **Cost-predictable**: Know exactly what you're paying for
-
-The speed tradeoff is worth it for complex tasks where correctness matters.
+Before calling an SME, Architect checks the cache. Already answered? Skip.
 
 ---
 
-## Tool Permission Rationale
+### 8. User Checkpoints (Not Full Autonomy)
 
-### Why Explorer is Read-Only
+**The temptation**: Let agents run until done.
 
-Explorer's job is discovery, not action:
-- Scans directory structure
-- Reads key files
-- Identifies patterns
-- **Never modifies anything**
+**The reality**: Full autonomy means:
+- Building the wrong thing for hours
+- No opportunity to course-correct
+- Surprise outcomes
+- Wasted resources
 
-If Explorer could write, it might "helpfully" fix things it finds—corrupting the analysis.
+**Swarm's approach**: Pause at phase boundaries.
 
-### Why SMEs are Read-Only
+```
+Phase 1 complete.
+Created: user model, password hashing, migrations
+Files: /src/models/user.ts, /src/auth/hash.ts
 
-SMEs provide expertise, not implementation:
-- Analyze code for domain-specific issues
-- Recommend approaches
-- Flag concerns
-- **Never implement their own recommendations**
+Ready to proceed to Phase 2: Core Auth?
+```
 
-Keeping SMEs read-only ensures clear separation between advice and action.
-
-### Why Architect Has Full Access
-
-The Architect needs fallback capability:
-- If Explorer fails, Architect can scan directly
-- If Coder produces bad output, Architect can fix it
-- If the pipeline breaks, Architect can recover
-
-This ensures the system degrades gracefully rather than failing completely.
+User can:
+- Approve and continue
+- Request changes
+- Adjust the plan
+- Stop and resume later
 
 ---
 
-## Summary
+### 9. Failure Tracking (Not Silent Retry)
 
-OpenCode Swarm's design prioritizes:
+**The temptation**: Just retry until it works.
 
-1. **Correctness over speed** - Serial execution, mandatory QA
-2. **Diversity over uniformity** - Heterogeneous models catch more errors
-3. **Clarity over cleverness** - Single point of control, clear permissions
-4. **Resilience over rigidity** - Architect fallback ensures graceful degradation
+**The reality**: Silent retries:
+- Hide systemic problems
+- Waste resources
+- Never improve
+- Frustrate users
 
-This design is optimized for **complex, high-stakes tasks** where getting it right matters more than getting it fast.
+**Swarm's approach**: Document all failures in plan.md.
+
+```markdown
+- [ ] Task 2.2: JWT generation
+  - Attempt 1: REJECTED - Missing expiration claim
+  - Attempt 2: REJECTED - Wrong signing algorithm
+  - Attempt 3: ESCALATED - Architect implementing directly
+```
+
+Benefits:
+- Visibility into what's hard
+- Pattern detection (same failure = prompt problem)
+- Accountability
+- Learning opportunity
+
+---
+
+### 10. Explicit Dependencies (Not Implicit Order)
+
+**The temptation**: Tasks are independent, run in any order.
+
+**The reality**: Most tasks have dependencies:
+- Can't test what isn't written
+- Can't integrate what doesn't exist
+- Order matters
+
+**Swarm's approach**: Explicit dependency declaration.
+
+```markdown
+- [x] Task 2.1: Create user model
+- [ ] Task 2.2: Add authentication (depends: 2.1)
+- [ ] Task 2.3: Create API endpoints (depends: 2.1, 2.2)
+- [ ] Task 2.4: Input validation (independent)
+```
+
+Architect respects dependencies. Won't start 2.2 until 2.1 is complete.
+
+---
+
+## The Result
+
+When you combine all these decisions:
+
+| Without Structure | With Swarm |
+|-------------------|------------|
+| Chaotic parallel execution | Predictable serial flow |
+| Ad-hoc "figure it out" | Documented phased plan |
+| Lost context between sessions | Persistent `.swarm/` memory |
+| QA as afterthought | QA per task |
+| Batched, unfocused work | One task at a time |
+| Single model blindspots | Heterogeneous review |
+| Repeated SME questions | Cached guidance |
+| Full autonomy disasters | User checkpoints |
+| Silent failures | Documented attempts |
+| Implicit ordering | Explicit dependencies |
+
+**The difference**: Code that actually works.

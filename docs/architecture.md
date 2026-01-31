@@ -1,170 +1,348 @@
 # OpenCode Swarm Architecture
 
-OpenCode Swarm uses an **architect-centric control model** where a single orchestrating agent owns all decisions while specialized agents provide expertise, implementation, and validation.
+## Design Philosophy
 
-## Design Goals
+OpenCode Swarm is built on a simple premise: **multi-agent systems fail when they're unstructured**.
 
-| Goal | How We Achieve It |
-|------|-------------------|
-| Deterministic execution | Serial agent invocation, no parallel races |
-| Explainable reasoning | Clear delegation traces, structured handoffs |
-| Minimal hallucination propagation | Explorer validates context before SME consultation |
-| Clear ownership | Architect decides, others advise or execute |
-| Fail-safe operation | Architect can fall back to direct action |
+Most frameworks throw agents at a problem and hope coherence emerges. It doesn't. You get race conditions, conflicting changes, lost context, and code that doesn't work.
+
+Swarm enforces discipline:
+- One Architect owns all decisions
+- One task executes at a time
+- Every task gets QA'd before the next starts
+- Project state persists in files, not memory
 
 ---
 
 ## Control Model
 
-### The Architect
-
-Only the Architect:
-- Analyzes user intent and determines task type
-- Delegates to Explorer for codebase discovery
-- Selects which SMEs to consult based on Explorer findings
-- Synthesizes specifications from gathered expertise
-- Triages QA feedback (approve/revise/block)
-- Delivers final output to the user
-
-The Architect has **full tool access** so it can recover if any delegation fails.
-
-### Subordinate Agents
-
-All other agents operate under delegation with restricted permissions:
-
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         ARCHITECT                                │
-│                    (full access, owns decisions)                 │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-        ┌─────────────────────┼─────────────────────┐
-        │                     │                     │
-        ▼                     ▼                     ▼
-┌───────────────┐    ┌───────────────┐    ┌───────────────┐
-│   EXPLORER    │    │     SMEs      │    │      QA       │
-│  (read-only)  │    │  (read-only)  │    │  (read-only)  │
-└───────────────┘    └───────────────┘    └───────────────┘
-                              │
-                              ▼
-                     ┌───────────────┐    ┌───────────────┐
-                     │    CODER      │    │     TEST      │
-                     │ (read/write)  │    │ (read/write)  │
-                     └───────────────┘    └───────────────┘
+                    ┌─────────────┐
+                    │  ARCHITECT  │
+                    │  (control)  │
+                    └──────┬──────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+        ▼                  ▼                  ▼
+┌───────────────┐  ┌───────────────┐  ┌───────────────┐
+│   EXPLORER    │  │     SMEs      │  │   PIPELINE    │
+│  (discovery)  │  │  (advisory)   │  │ (execution)   │
+└───────────────┘  └───────────────┘  └───────────────┘
+                                              │
+                                   ┌──────────┴──────────┐
+                                   │                     │
+                                   ▼                     ▼
+                           ┌─────────────┐       ┌─────────────┐
+                           │    CODER    │       │     QA      │
+                           │ (implement) │       │  (verify)   │
+                           └─────────────┘       └─────────────┘
 ```
 
----
+### Architect: The Brain
+- Owns the plan
+- Makes all delegation decisions
+- Synthesizes inputs from other agents
+- Handles failures and escalations
+- Maintains project memory
 
-## Agent Categories
+### Explorer: The Eyes
+- Fast codebase scanning
+- Structure and pattern identification
+- Domain detection for SME routing
+- Re-runs at phase boundaries to capture changes
 
-### Discovery Layer
-| Agent | Access | Purpose |
-|-------|--------|---------|
-| Explorer | Read | Scan codebase, identify structure, detect domains, flag files |
+### SMEs: The Advisors
+- 15 specialized domain experts
+- Consulted serially (never parallel)
+- Guidance cached in context.md
+- Read-only (cannot write code)
 
-### Advisory Layer (Read-Only)
-| Agent | Access | Purpose |
-|-------|--------|---------|
-| SME_* (×11) | Read | Provide domain expertise, recommend approaches |
-| Security Reviewer | Read | Identify vulnerabilities, assess risk |
-| Auditor | Read | Verify correctness, check logic |
-
-### Implementation Layer
-| Agent | Access | Purpose |
-|-------|--------|---------|
-| Coder | Read/Write | Implement specifications |
-| Test Engineer | Read/Write | Generate test cases |
+### Pipeline Agents: The Hands
+- Coder: Implements one task at a time
+- Security Reviewer: Finds vulnerabilities
+- Auditor: Verifies correctness
+- Test Engineer: Generates tests
 
 ---
 
 ## Execution Flow
 
-### Phase 1: Discovery
-```
-User Request → Architect (parse) → Explorer (scan)
-```
-Explorer returns:
-- Project summary (type, languages, frameworks)
-- Directory structure
-- Key files identified
-- Relevant domains for SME consultation
-- Files flagged for review
+### Phase 0: Initialize or Resume
 
-### Phase 2: Consultation
 ```
-Explorer Output → Architect (select SMEs) → SME_* (serial)
-```
-- Only domains identified by Explorer are consulted
-- Typically 1-3 SMEs, never all 11
-- Each SME reviews flagged files and provides recommendations
-
-### Phase 3: Synthesis
-```
-SME Outputs → Architect (collate) → Unified Specification
-```
-Architect synthesizes:
-- For reviews: consolidated findings report
-- For implementation: detailed specification for Coder
-
-### Phase 4: Implementation (if applicable)
-```
-Specification → Coder → Code Output
+Is .swarm/plan.md present?
+├── YES → Read plan.md and context.md
+│         Find current phase and task
+│         Resume execution
+│
+└── NO  → New project
+          Proceed to Phase 1
 ```
 
-### Phase 5: Validation
-```
-Code → Security Reviewer → Auditor → Architect (triage)
-```
-Triage outcomes:
-- **APPROVED** → Test Engineer
-- **REVISION_NEEDED** → Back to Coder with feedback
-- **BLOCKED** → Explain why, end pipeline
+### Phase 1: Clarify
 
-### Phase 6: Testing (if approved)
 ```
-Approved Code → Test Engineer → Test Cases
+Is the user request clear?
+├── YES → Proceed to Phase 2
+│
+└── NO  → Ask up to 3 clarifying questions
+          Wait for answers
+          Then proceed
+```
+
+### Phase 2: Discover
+
+```
+@explorer analyzes codebase
+    │
+    ├── Project structure
+    ├── Languages and frameworks
+    ├── Key files
+    ├── Patterns observed
+    └── Relevant SME domains
+```
+
+### Phase 3: Consult SMEs
+
+```
+For each relevant domain:
+    │
+    ├── Check context.md for cached guidance
+    │   └── If cached → Skip this SME
+    │
+    └── If not cached:
+        ├── Delegate to @sme_[domain]
+        ├── Wait for response
+        └── Cache guidance in context.md
+```
+
+### Phase 4: Plan
+
+```
+Create/Update .swarm/plan.md:
+    │
+    ├── Project overview
+    ├── Phases (logical groupings)
+    │   └── Tasks (atomic units of work)
+    │       ├── Dependencies
+    │       ├── Acceptance criteria
+    │       └── Complexity estimate
+    │
+    └── Status tracking
+```
+
+### Phase 5: Execute
+
+```
+For each task in current phase:
+    │
+    ├── Check dependencies complete
+    │   └── If blocked → Skip, mark [BLOCKED]
+    │
+    ├── @coder implements (ONE task)
+    │   └── Wait for completion
+    │
+    ├── @security_reviewer audits
+    │   └── Wait for response
+    │
+    ├── @auditor verifies
+    │   ├── APPROVED → Continue
+    │   └── REJECTED → Retry (max 3)
+    │       └── After 3 failures → Escalate
+    │
+    ├── @test_engineer generates tests
+    │   └── Wait for completion
+    │
+    └── Update plan.md [x] complete
+```
+
+### Phase 6: Phase Complete
+
+```
+All tasks in phase done
+    │
+    ├── Re-run @explorer (codebase changed)
+    ├── Update context.md with learnings
+    ├── Archive to .swarm/history/phase-N.md
+    │
+    └── Ask user: "Ready for Phase [N+1]?"
+        ├── YES → Proceed
+        └── NO  → Wait
 ```
 
 ---
 
-## Execution Guarantees
+## File Structure
 
-| Guarantee | Description |
-|-----------|-------------|
-| Serial execution | Agents run one at a time, never parallel |
-| No SME broadcast | Only relevant domains consulted |
-| QA before delivery | Security + Audit review required |
-| No unreviewed code | All implementation passes through QA |
-| Traceable delegation | Clear logs of which agent did what |
+```
+project/
+├── .swarm/
+│   ├── plan.md        # Phased roadmap with task status
+│   ├── context.md     # Project knowledge, SME cache
+│   └── history/
+│       ├── phase-1.md # Archived phase summaries
+│       └── phase-2.md
+│
+└── [project files]
+```
+
+### plan.md Schema
+
+```markdown
+# Project: [Name]
+Created: [ISO date]
+Last Updated: [ISO date]
+Current Phase: [N]
+
+## Overview
+[1-2 paragraph project summary]
+
+## Phase 1: [Name] [STATUS]
+Estimated: [SMALL/MEDIUM/LARGE]
+
+- [x] Task 1.1: [Description] [SIZE]
+  - Acceptance: [Criteria]
+- [ ] Task 1.2: [Description] [SIZE] (depends: 1.1)
+  - Acceptance: [Criteria]
+  - Attempt 1: REJECTED - [Reason]
+  - Attempt 2: REJECTED - [Reason]
+- [BLOCKED] Task 1.3: [Description]
+  - Reason: [Why blocked]
+
+## Phase 2: [Name] [PENDING]
+...
+```
+
+### context.md Schema
+
+```markdown
+# Project Context: [Name]
+
+## Summary
+[What the project does, who it's for]
+
+## Technical Decisions
+- [Decision]: [Rationale]
+
+## Architecture
+[Key patterns, file organization]
+
+## SME Guidance Cache
+### [Domain] (Phase [N])
+- [Guidance point]
+
+## Patterns Established
+- [Pattern]: [Where/how used]
+
+## Known Issues / Tech Debt
+- [ ] [Issue to address later]
+
+## File Map
+- [path]: [Purpose]
+```
 
 ---
 
-## Why Serial Execution?
+## Agent Permissions
 
-Parallel agent execution introduces:
-- Race conditions in file access
-- Conflicting recommendations
-- Difficult debugging
-- Unpredictable resource usage
-
-Serial execution provides:
-- Deterministic behavior
-- Clear cause-and-effect
-- Easy debugging
-- Predictable costs
-
-The tradeoff is speed, but for complex tasks, **correctness beats velocity**.
+| Agent | Read | Write | Execute | Delegate |
+|-------|:----:|:-----:|:-------:|:--------:|
+| architect | ✅ | ✅ | ✅ | ✅ |
+| explorer | ✅ | ❌ | ❌ | ❌ |
+| sme_* | ✅ | ❌ | ❌ | ❌ |
+| coder | ✅ | ✅ | ✅ | ❌ |
+| security_reviewer | ✅ | ❌ | ❌ | ❌ |
+| auditor | ✅ | ❌ | ❌ | ❌ |
+| test_engineer | ✅ | ✅ | ✅ | ❌ |
 
 ---
 
 ## Failure Handling
 
-If any agent fails or produces poor output:
+### Task Rejection
 
-1. Architect receives the failure/output
-2. Architect can retry with different parameters
-3. Architect can skip the agent and proceed
-4. Architect can handle the task directly (has full access)
-5. Architect can ask user for clarification
+```
+Attempt 1: @coder implements
+           @auditor rejects with feedback
+           
+Attempt 2: @coder fixes based on feedback
+           @auditor rejects again
+           
+Attempt 3: @coder fixes again
+           @auditor rejects
+           
+Escalation: Architect handles directly
+            OR re-scopes task
+            Document in plan.md
+```
 
-This ensures the pipeline never completely breaks due to a single agent failure.
+### Blocked Tasks
+
+```
+Task cannot proceed (external dependency):
+├── Mark [BLOCKED] in plan.md
+├── Record reason
+├── Skip to next unblocked task
+└── Inform user
+```
+
+### Agent Failure
+
+```
+Agent times out or errors:
+├── Retry once
+├── If still failing:
+│   └── Architect handles directly
+└── Document in context.md
+```
+
+---
+
+## Why Serial Execution?
+
+Parallel execution causes:
+- Race conditions in file modifications
+- Context inconsistency between agents
+- Non-deterministic outputs
+- Debugging nightmares
+
+Serial execution provides:
+- Predictable order of operations
+- Clear causal chain
+- Reproducible results
+- Easy debugging
+
+**Correctness > Speed**
+
+---
+
+## Why QA Per Task?
+
+QA at the end causes:
+- Accumulated bugs
+- Cascading failures (Task 3 builds on buggy Task 2)
+- Massive rework
+- Lost context on what each task was supposed to do
+
+QA per task provides:
+- Immediate feedback
+- Issues fixed while context is fresh
+- No bug accumulation
+- Clear task boundaries
+
+---
+
+## Why Persistent Files?
+
+Session-only memory causes:
+- Lost progress on session end
+- No way to resume projects
+- Re-explaining context every time
+- No institutional knowledge
+
+Persistent `.swarm/` files provide:
+- Resume any project instantly
+- Knowledge transfer between sessions
+- Audit trail of decisions
+- Cached SME guidance (no re-asking)

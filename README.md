@@ -1,112 +1,223 @@
-# OpenCode Swarm
+<p align="center">
+  <img src="https://img.shields.io/badge/version-3.0.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+  <img src="https://img.shields.io/badge/opencode-plugin-purple" alt="OpenCode Plugin">
+  <img src="https://img.shields.io/badge/agents-20+-orange" alt="Agents">
+</p>
 
-![License](https://img.shields.io/badge/license-MIT-blue)
-![OpenCode Plugin](https://img.shields.io/badge/opencode-plugin-green)
-![Architecture](https://img.shields.io/badge/architecture-architect--centric-purple)
-![Version](https://img.shields.io/badge/version-2.2.1-orange)
+<h1 align="center">🐝 OpenCode Swarm</h1>
 
-**Architect-driven, multi-agent development for OpenCode.**
+<p align="center">
+  <strong>The only multi-agent framework that actually works.</strong><br>
+  Structured phases. Persistent memory. One task at a time. QA on everything.
+</p>
 
-Design-first orchestration with codebase discovery, domain-aware SMEs, heterogeneous model perspectives, and layered QA review.
+<p align="center">
+  <a href="#why-swarm">Why Swarm?</a> •
+  <a href="#how-it-works">How It Works</a> •
+  <a href="#installation">Installation</a> •
+  <a href="#agents">Agents</a> •
+  <a href="#configuration">Configuration</a>
+</p>
+
+---
+
+## The Problem with Every Other Multi-Agent System
 
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│  "Review this PowerShell application for security issues"                │
-└──────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│  ARCHITECT: Delegating to @explorer for codebase analysis...             │
-└──────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│  EXPLORER: PowerShell module, 12 files, domains: powershell, security    │
-│  → Flagged: auth.ps1, invoke-command.ps1 for SME review                  │
-└──────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│  SME_POWERSHELL: Remoting patterns detected, needs constrained endpoints │
-│  SME_SECURITY: Credential handling issues in auth.ps1:42-58              │
-└──────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│  ARCHITECT: Collated review with 3 HIGH findings, 2 recommendations      │
-└──────────────────────────────────────────────────────────────────────────┘
+You: "Build me an authentication system"
+
+Other Frameworks:
+├── Agent 1 starts auth module...
+├── Agent 2 starts user model... (conflicts with Agent 1)
+├── Agent 3 starts database... (wrong schema)
+├── Agent 4 starts tests... (for code that doesn't exist yet)
+└── Result: Chaos. Conflicts. Context lost. Start over.
+
+OpenCode Swarm:
+├── Architect analyzes request
+├── Explorer scans codebase
+├── Security SME provides auth guidance
+├── Architect creates phased plan with acceptance criteria
+├── Phase 1: User model → QA → Tests → ✓
+├── Phase 2: Auth logic → QA → Tests → ✓
+├── Phase 3: Session management → QA → Tests → ✓
+└── Result: Working code. Documented decisions. Resumable progress.
 ```
 
 ---
 
-## Why OpenCode Swarm?
+## Why Swarm?
 
-Most agent frameworks parallelize everything and hope coherence emerges.
-**OpenCode Swarm enforces discipline:**
+<table>
+<tr>
+<td width="50%">
 
-| Problem | Our Solution |
-|---------|--------------|
-| Agents read the same files repeatedly | Explorer scans once, shares context |
-| All 11 SMEs consulted for every task | Only relevant domains (1-3) based on Explorer findings |
-| Single model = correlated failures | Different models per role = diverse perspectives |
-| No visibility into agent decisions | Serial execution with clear delegation traces |
-| Code ships without review | Mandatory Security → Audit → Test pipeline |
+### ❌ Other Frameworks
 
----
+- Parallel chaos, hope it converges
+- Single model = correlated failures
+- No planning, just vibes
+- Context lost between sessions
+- QA as afterthought (if at all)
+- Entire codebase in one prompt
+- No way to resume projects
 
-## Architecture
+</td>
+<td width="50%">
 
-```
-User Request
-     │
-     ▼
-┌─────────────┐
-│  ARCHITECT  │ ◄── Orchestrates everything, owns all decisions
-└─────────────┘
-     │
-     ▼
-┌─────────────┐
-│  EXPLORER   │ ◄── Fast codebase discovery (read-only)
-└─────────────┘     Returns: structure, languages, domains, flagged files
-     │
-     ▼
-┌─────────────┐
-│    SMEs     │ ◄── Domain experts consulted serially (read-only)
-└─────────────┘     Only domains identified by Explorer
-     │
-     ▼
-┌─────────────┐
-│   CODER     │ ◄── Implements unified specification
-└─────────────┘
-     │
-     ▼
-┌─────────────┐     ┌─────────────┐
-│  SECURITY   │ ──► │   AUDITOR   │ ◄── QA review (read-only)
-└─────────────┘     └─────────────┘
-     │
-     ▼
-┌─────────────┐
-│    TEST     │ ◄── Generates tests for approved code
-└─────────────┘
-```
+### ✅ OpenCode Swarm
 
-### Agent Permissions
+- **Serial execution** - predictable, traceable
+- **Heterogeneous models** - different perspectives catch errors
+- **Phased planning** - documented tasks with acceptance criteria
+- **Persistent memory** - `.swarm/` files survive sessions
+- **QA per task** - security + audit before anything ships
+- **One task at a time** - focused, quality code
+- **Resumable projects** - pick up exactly where you left off
 
-| Agent | Read | Write | Role |
-|-------|:----:|:-----:|------|
-| Architect | ✅ | ✅ | Orchestrator - can fall back if delegation fails |
-| Explorer | ✅ | ❌ | Discovery - scans, summarizes, identifies domains |
-| SMEs (×15) | ✅ | ❌ | Advisory - domain expertise, never implements |
-| Coder | ✅ | ✅ | Implementation - writes production code |
-| Security Reviewer | ✅ | ❌ | Audit - vulnerability assessment |
-| Auditor | ✅ | ❌ | Audit - correctness verification |
-| Test Engineer | ✅ | ✅ | Testing - generates test cases |
+</td>
+</tr>
+</table>
 
 ---
 
-## Heterogeneous Model Perspectives
+## How It Works
 
-OpenCode Swarm allows **different models per role**, reducing correlated failures:
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  USER: "Add user authentication with JWT"                               │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  PHASE 0: Check for .swarm/plan.md                                      │
+│           Exists? Resume. New? Continue.                                │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  PHASE 1: Clarify (if needed)                                           │
+│           "Do you need refresh tokens? What's the session duration?"    │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  PHASE 2: Discover                                                      │
+│           @explorer scans codebase → structure, languages, patterns     │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  PHASE 3: Consult SMEs (serial, cached)                                 │
+│           @sme_security → auth best practices                           │
+│           @sme_api → JWT patterns, refresh flow                         │
+│           Guidance saved to .swarm/context.md                           │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  PHASE 4: Plan                                                          │
+│           Creates .swarm/plan.md with phases, tasks, acceptance criteria│
+│                                                                         │
+│           Phase 1: Foundation [3 tasks]                                 │
+│           Phase 2: Core Auth [4 tasks]                                  │
+│           Phase 3: Session Management [3 tasks]                         │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  PHASE 5: Execute (per task)                                            │
+│                                                                         │
+│   ┌─────────┐    ┌──────────┐    ┌─────────┐    ┌──────────┐           │
+│   │ @coder  │ →  │@security │ →  │@auditor │ →  │  @test   │           │
+│   │ 1 task  │    │ review   │    │ verify  │    │ generate │           │
+│   └─────────┘    └──────────┘    └─────────┘    └──────────┘           │
+│        │                                              │                 │
+│        └──── If rejected: retry with feedback ────────┘                 │
+│                                                                         │
+│   Update plan.md: [x] Task complete                                     │
+│   Next task...                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  PHASE 6: Phase Complete                                                │
+│           Re-scan with @explorer                                        │
+│           Update context.md with learnings                              │
+│           Archive to .swarm/history/                                    │
+│           "Phase 1 complete. Ready for Phase 2?"                        │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Persistent Project Memory
+
+Other frameworks lose everything when the session ends. Swarm doesn't.
+
+```
+.swarm/
+├── plan.md          # Your project roadmap
+├── context.md       # Everything a new Architect needs
+└── history/
+    ├── phase-1.md   # What was done, what was learned
+    └── phase-2.md
+```
+
+### plan.md - Living Roadmap
+```markdown
+# Project: Auth System
+Current Phase: 2
+
+## Phase 1: Foundation [COMPLETE]
+- [x] Task 1.1: Create user model [SMALL]
+- [x] Task 1.2: Add password hashing [SMALL]
+- [x] Task 1.3: Database migrations [MEDIUM]
+
+## Phase 2: Core Auth [IN PROGRESS]
+- [x] Task 2.1: Login endpoint [MEDIUM]
+- [ ] Task 2.2: JWT generation [MEDIUM] (depends: 2.1) ← CURRENT
+  - Acceptance: Returns valid JWT with user claims
+  - Attempt 1: REJECTED - Missing expiration
+- [ ] Task 2.3: Token validation middleware [MEDIUM]
+- [BLOCKED] Task 2.4: Refresh tokens
+  - Reason: Waiting for decision on rotation strategy
+```
+
+### context.md - Institutional Knowledge
+```markdown
+# Project Context: Auth System
+
+## Technical Decisions
+- Using bcrypt (cost 12) for password hashing
+- JWT expires in 15 minutes, refresh in 7 days
+- Storing refresh tokens in Redis
+
+## SME Guidance Cache
+### Security (Phase 1)
+- Never log tokens or passwords
+- Use constant-time comparison for tokens
+- Implement rate limiting on login
+
+### API (Phase 1)
+- Return 401 for invalid credentials (not 404)
+- Include token expiry in response body
+
+## Patterns Established
+- Error handling: Custom ApiError class with status codes
+- Validation: Zod schemas in /validators/
+```
+
+**Start a new session tomorrow?** The Architect reads these files and picks up exactly where you left off.
+
+---
+
+## Heterogeneous Models = Better Code
+
+Most frameworks use one model for everything. Same blindspots everywhere.
+
+Swarm lets you mix models strategically:
 
 ```json
 {
@@ -115,35 +226,81 @@ OpenCode Swarm allows **different models per role**, reducing correlated failure
     "explorer": { "model": "google/gemini-2.0-flash" },
     "coder": { "model": "anthropic/claude-sonnet-4-5" },
     "_sme": { "model": "google/gemini-2.0-flash" },
-    "_qa": { "model": "openai/gpt-4o" },
-    "test_engineer": { "model": "google/gemini-2.0-flash" }
+    "security_reviewer": { "model": "openai/gpt-4o" },
+    "auditor": { "model": "google/gemini-2.0-flash" }
   }
 }
 ```
 
-**Why this matters:**
-- Reasoning-heavy model for Architect decisions
-- Fast/cheap model for Explorer and SME consultation  
-- Different model family for QA catches errors the others miss
-- Mix local (Ollama) and cloud models based on cost/capability
+| Role | Optimized For | Why Different Models? |
+|------|---------------|----------------------|
+| Architect | Deep reasoning | Needs to plan complex work |
+| Explorer | Fast scanning | Speed over depth |
+| Coder | Implementation | Best coding model you have |
+| SMEs | Domain knowledge | Fast recall, not deep reasoning |
+| Security Reviewer | Finding flaws | **Different vendor catches different bugs** |
+| Auditor | Verification | Independent perspective |
+
+**If Claude writes code and GPT reviews it, GPT catches Claude's blindspots.** This is why real teams have code review.
 
 ---
 
 ## Installation
 
-Add to your `opencode.json`:
-
-```json
+```bash
+# Add to opencode.json
 {
   "plugin": ["opencode-swarm"]
 }
-```
 
-Or install via CLI:
-
-```bash
+# Or install via CLI
 bunx opencode-swarm install
 ```
+
+---
+
+## Agents
+
+### 🎯 Orchestrator
+| Agent | Role |
+|-------|------|
+| `architect` | Central coordinator. Plans phases, delegates tasks, manages QA, maintains project memory. |
+
+### 🔍 Discovery
+| Agent | Role |
+|-------|------|
+| `explorer` | Fast codebase scanner. Identifies structure, languages, frameworks, key files. |
+
+### 🧠 Domain Experts (15 SMEs)
+| Agent | Domain |
+|-------|--------|
+| `sme_web` | Flutter, React, Vue, Angular, JS/TS, HTML/CSS |
+| `sme_api` | REST, GraphQL, OAuth, JWT, webhooks |
+| `sme_database` | SQL Server, PostgreSQL, MySQL, MongoDB, Redis |
+| `sme_devops` | Docker, Kubernetes, CI/CD, Terraform |
+| `sme_security` | STIG, hardening, CVE, encryption, PKI |
+| `sme_python` | Python ecosystem, libraries, patterns |
+| `sme_powershell` | PowerShell scripting, modules, remoting |
+| `sme_windows` | Windows internals, registry, services, WMI |
+| `sme_linux` | Linux, systemd, package management |
+| `sme_network` | TCP/IP, firewalls, DNS, TLS |
+| `sme_azure` | Azure services, Entra ID, ARM/Bicep |
+| `sme_vmware` | vSphere, ESXi, PowerCLI |
+| `sme_oracle` | Oracle Database, SQL/PLSQL |
+| `sme_active_directory` | AD, LDAP, Group Policy, Kerberos |
+| `sme_ui_ux` | UI/UX design, accessibility |
+
+### 💻 Implementation
+| Agent | Role |
+|-------|------|
+| `coder` | Implements ONE task at a time with full context |
+| `test_engineer` | Generates tests for each completed task |
+
+### ✅ Quality Assurance
+| Agent | Role |
+|-------|------|
+| `security_reviewer` | Vulnerability assessment per task |
+| `auditor` | Correctness verification per task |
 
 ---
 
@@ -166,143 +323,60 @@ Create `~/.config/opencode/opencode-swarm.json`:
 
 ### Category Defaults
 
-`_sme` and `_qa` set defaults for all agents in that category:
+- `_sme` → All 15 SME agents
+- `_qa` → security_reviewer + auditor
 
+Override specific agents:
 ```json
 {
-  "agents": {
-    "_sme": { "model": "google/gemini-2.0-flash" },
-    "sme_oracle": { "model": "anthropic/claude-sonnet-4-5" }
-  }
+  "_sme": { "model": "google/gemini-2.0-flash" },
+  "sme_security": { "model": "anthropic/claude-sonnet-4-5" }
 }
 ```
 
 ### Disable Unused Domains
-
 ```json
 {
-  "agents": {
-    "sme_vmware": { "disabled": true },
-    "sme_azure": { "disabled": true }
-  }
+  "sme_vmware": { "disabled": true },
+  "sme_oracle": { "disabled": true }
 }
 ```
 
-### Custom Prompts
+---
 
-Place in `~/.config/opencode/opencode-swarm/`:
-- `{agent}.md` - Replace default prompt
-- `{agent}_append.md` - Append to default prompt
+## Comparison
+
+| Feature | OpenCode Swarm | AutoGen | CrewAI | LangGraph |
+|---------|---------------|---------|--------|-----------|
+| Execution | Serial (predictable) | Parallel (chaotic) | Parallel | Configurable |
+| Planning | Phased with acceptance criteria | Ad-hoc | Role-based | Graph-based |
+| Memory | Persistent `.swarm/` files | Session only | Session only | Checkpoints |
+| QA | Per-task (security + audit) | Optional | Optional | Manual |
+| Model mixing | Per-agent configuration | Limited | Limited | Manual |
+| Resume projects | ✅ Native | ❌ | ❌ | Partial |
+| SME domains | 15 specialized | Generic | Generic | Generic |
+| Task granularity | One at a time | Batched | Batched | Varies |
 
 ---
 
-## Agents
+## Design Principles
 
-### Orchestrator
-| Agent | Description |
-|-------|-------------|
-| `architect` | Central orchestrator. Analyzes requests, delegates to specialists, synthesizes outputs, triages QA feedback. |
-
-### Discovery
-| Agent | Description |
-|-------|-------------|
-| `explorer` | Fast codebase scanner. Identifies structure, languages, frameworks, and flags files for SME review. |
-
-### Domain Experts (SMEs)
-| Agent | Domain |
-|-------|--------|
-| `sme_windows` | Windows internals, registry, services, WMI/CIM |
-| `sme_powershell` | PowerShell scripting, cmdlets, modules, remoting |
-| `sme_python` | Python ecosystem, libraries, packaging |
-| `sme_oracle` | Oracle Database, SQL/PLSQL, administration |
-| `sme_network` | TCP/IP, firewalls, DNS, TLS, load balancing |
-| `sme_security` | STIG compliance, hardening, CVEs, PKI |
-| `sme_linux` | Linux administration, systemd, package management |
-| `sme_vmware` | vSphere, ESXi, PowerCLI, virtualization |
-| `sme_azure` | Azure services, Entra ID, ARM/Bicep |
-| `sme_active_directory` | AD, LDAP, Group Policy, Kerberos |
-| `sme_ui_ux` | UI/UX design, accessibility, interaction patterns |
-| `sme_web` | Flutter, React, Vue, Angular, JS/TS, HTML/CSS |
-| `sme_database` | SQL Server, PostgreSQL, MySQL, MongoDB, Redis |
-| `sme_devops` | Docker, Kubernetes, CI/CD, Terraform, GitHub Actions |
-| `sme_api` | REST, GraphQL, OAuth, JWT, webhooks |
-
-### Implementation
-| Agent | Description |
-|-------|-------------|
-| `coder` | Writes production code from unified specifications |
-| `test_engineer` | Generates test cases and validation scripts |
-
-### Quality Assurance
-| Agent | Description |
-|-------|-------------|
-| `security_reviewer` | Vulnerability assessment, injection risks, data exposure |
-| `auditor` | Correctness verification, logic errors, edge cases |
-
----
-
-## Tools
-
-| Tool | Description |
-|------|-------------|
-| `gitingest` | Fetch GitHub repository contents for analysis |
-| `detect_domains` | Auto-detect relevant SME domains from text |
-| `extract_code_blocks` | Extract code blocks to files |
-
-### gitingest Example
-
-```
-"Analyze the architecture of https://github.com/user/repo"
-"Use gitingest to fetch https://github.com/user/repo with pattern *.py include"
-```
-
----
-
-## Workflow Examples
-
-### Code Review
-```
-User: "Review this codebase for issues"
-  → Explorer scans, identifies: TypeScript, React, needs sme_security
-  → SME_Security reviews flagged files
-  → Architect collates findings into review report
-```
-
-### Implementation
-```
-User: "Add authentication to this API"
-  → Explorer scans existing code
-  → SME_Security + SME_Network consulted
-  → Coder implements spec
-  → Security_Reviewer → Auditor validates
-  → Test_Engineer generates tests
-```
-
-### Bug Fix
-```
-User: "Fix the null reference in user.ts:42"
-  → Explorer locates context
-  → Relevant SME consulted
-  → Coder implements fix
-  → QA validates
-```
-
----
-
-## Design Philosophy
-
-1. **Single point of control** - Architect owns all decisions
-2. **Discovery before action** - Explorer maps the terrain first
-3. **Selective expertise** - Only relevant SMEs consulted
-4. **Serial execution** - Traceable, debuggable, predictable
-5. **Mandatory QA** - No code ships without security + audit review
-6. **Fail-safe orchestration** - Architect can handle tasks itself if agents fail
+1. **Plan before code** - Documented phases with acceptance criteria
+2. **One task at a time** - Focused work, quality output
+3. **QA everything immediately** - Security + audit per task, not per project
+4. **Cache SME knowledge** - Don't re-ask answered questions
+5. **Persistent memory** - `.swarm/` files survive sessions
+6. **Serial execution** - Predictable, debuggable, no race conditions
+7. **Heterogeneous models** - Different perspectives catch different bugs
+8. **User checkpoints** - Confirm before proceeding to next phase
+9. **Failure tracking** - Document rejections, escalate after 3 attempts
+10. **Resumable by design** - Any Architect can pick up any project
 
 ---
 
 ## Documentation
 
-- [Architecture Details](docs/architecture.md)
+- [Architecture Deep Dive](docs/architecture.md)
 - [Design Rationale](docs/design-rationale.md)
 - [Installation Guide](docs/installation.md)
 
@@ -311,3 +385,9 @@ User: "Fix the null reference in user.ts:42"
 ## License
 
 MIT
+
+---
+
+<p align="center">
+  <strong>Stop hoping your agents figure it out. Start shipping code that works.</strong>
+</p>
