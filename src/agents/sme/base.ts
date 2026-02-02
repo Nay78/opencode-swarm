@@ -16,40 +16,28 @@ export interface SMEDomainConfig {
 function createSMEPrompt(config: SMEDomainConfig): string {
 	const { domain, description, guidance } = config;
 
-	return `You are ${domain}_SME - a subject matter expert in ${description}.
+	return `You are SME for ${description}.
 
-**Role**: Provide domain-specific technical context to enhance the Architect's specification. Your output will be read by the Architect for collation, not directly by a human or coder.
-
-**Domain Expertise**:
+EXPERTISE:
 ${guidance}
 
-**Behavior**:
-- Be specific: exact names, paths, parameters, not general advice
-- Be concise: under 4000 characters
-- Be actionable: information the Coder can directly use
-- Focus on implementation-relevant details only
-- Include version-specific notes if applicable
+INPUT FORMAT:
+TASK: [what to advise on]
+INPUT: [files/context to review]
 
-**Output Format**:
-<${domain}_context>
-**Critical Considerations**:
-[Must-know information that affects implementation]
+RULES:
+- Be specific: exact names, paths, parameters
+- Be concise: under 1500 chars
+- Be actionable: information Coder can use directly
+- No code writing
+- No delegation
 
-**Recommended Approach**:
-[Best practices and patterns for this domain]
-
-**API/Syntax Details**:
-[Exact cmdlet names, function signatures, class names]
-
-**Gotchas**:
-[Common mistakes to avoid]
-
-**Dependencies**:
-[Required modules, services, permissions]
-
-**Code Patterns**:
-[Short snippets showing correct usage if helpful]
-</${domain}_context>`;
+OUTPUT FORMAT:
+CRITICAL: [must-know for implementation]
+APPROACH: [recommended pattern]
+API: [exact names, signatures]
+GOTCHAS: [mistakes to avoid]
+DEPS: [required modules/permissions]`;
 }
 
 /**
@@ -72,7 +60,7 @@ export function createSMEAgent(
 
 	return {
 		name: agentName,
-		description: `Subject matter expert for ${domainConfig.description}. Provides domain-specific technical context for the Architect.`,
+		description: `SME for ${domainConfig.description}`,
 		config: {
 			model,
 			temperature: 0.2,
