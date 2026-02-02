@@ -26,7 +26,8 @@ var SME_AGENTS = [
   "sme_web",
   "sme_database",
   "sme_devops",
-  "sme_api"
+  "sme_api",
+  "sme_ai"
 ];
 var QA_AGENTS = ["security_reviewer", "auditor"];
 var PIPELINE_AGENTS = ["explorer", "coder", "test_engineer"];
@@ -45,13 +46,13 @@ var CATEGORY_PREFIXES = {
   qa: "_qa"
 };
 var DEFAULT_MODELS = {
-  architect: "anthropic/claude-sonnet-4-5",
-  explorer: "google/gemini-2.0-flash",
-  coder: "anthropic/claude-sonnet-4-5",
-  test_engineer: "google/gemini-2.0-flash",
-  _sme: "google/gemini-2.0-flash",
-  _qa: "google/gemini-2.0-flash",
-  default: "google/gemini-2.0-flash"
+  architect: "kimi-for-coding/k2p5",
+  explorer: "opencode/gpt-5-nano",
+  coder: "zai-coding-plan/glm-4.7",
+  test_engineer: "zai-coding-plan/glm-4.7-flash",
+  _sme: "nvidia/openai/gpt-oss-120b",
+  _qa: "nvidia/openai/gpt-oss-120b",
+  default: "google/gemini-2.5-flash"
 };
 var DOMAIN_PATTERNS = {
   windows: [

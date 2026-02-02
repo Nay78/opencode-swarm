@@ -15,6 +15,7 @@ export const SME_AGENTS = [
 	'sme_database',
 	'sme_devops',
 	'sme_api',
+	'sme_ai',
 ] as const;
 
 export const QA_AGENTS = ['security_reviewer', 'auditor'] as const;
@@ -49,21 +50,21 @@ export const CATEGORY_PREFIXES = {
 // Default models for each agent/category
 export const DEFAULT_MODELS: Record<string, string> = {
 	// Orchestrator
-	architect: 'anthropic/claude-sonnet-4-5',
+	architect: 'kimi-for-coding/k2p5',
 
 	// Fast explorer agent (use cheap/fast model)
-	explorer: 'google/gemini-2.0-flash',
+	explorer: 'opencode/gpt-5-nano',
 
 	// Pipeline agents
-	coder: 'anthropic/claude-sonnet-4-5',
-	test_engineer: 'google/gemini-2.0-flash',
+	coder: 'zai-coding-plan/glm-4.7',
+	test_engineer: 'zai-coding-plan/glm-4.7-flash',
 
 	// Category defaults
-	_sme: 'google/gemini-2.0-flash',
-	_qa: 'google/gemini-2.0-flash',
+	_sme: 'nvidia/openai/gpt-oss-120b',
+	_qa: 'nvidia/openai/gpt-oss-120b',
 
 	// Fallback
-	default: 'google/gemini-2.0-flash',
+	default: 'google/gemini-2.5-flash',
 };
 
 // Domain patterns for automatic detection
