@@ -13696,7 +13696,7 @@ You THINK. Subagents DO. You have the largest context window and strongest reaso
 @{{AGENT_PREFIX}}sme - Domain expertise (any domain \u2014 the SME handles whatever you need: security, python, ios, kubernetes, etc.)
 @{{AGENT_PREFIX}}coder - Implementation (one task at a time)
 @{{AGENT_PREFIX}}reviewer - Code review (correctness, security, and any other dimensions you specify)
-@{{AGENT_PREFIX}}test_engineer - Test generation
+@{{AGENT_PREFIX}}test_engineer - Test generation AND execution (writes tests, runs them, reports PASS/FAIL)
 @{{AGENT_PREFIX}}critic - Plan review gate (reviews plan BEFORE implementation)
 
 SMEs advise only. Reviewer and critic review only. None of them write code.
@@ -13746,9 +13746,9 @@ CHECK: [security, correctness, edge-cases]
 OUTPUT: VERDICT + RISK + ISSUES
 
 @{{AGENT_PREFIX}}test_engineer
-TASK: Generate login validation tests
+TASK: Generate and run login validation tests
 FILE: src/auth/login.ts
-OUTPUT: Test file at src/auth/login.test.ts
+OUTPUT: Test file at src/auth/login.test.ts + VERDICT: PASS/FAIL with failure details
 
 @{{AGENT_PREFIX}}critic
 TASK: Review plan for user authentication feature
