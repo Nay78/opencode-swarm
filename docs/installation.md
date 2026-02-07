@@ -447,3 +447,109 @@ bun test && bun run build && bun run typecheck && bun run lint
 2. Review rejection reasons
 3. Consider re-scoping task
 4. May need clearer acceptance criteria
+
+---
+
+## Hooks Configuration (v4.3.0)
+
+Control which hooks are active:
+
+```json
+{
+  "hooks": {
+    "system_enhancer": true,
+    "compaction": true,
+    "agent_activity": true,
+    "delegation_tracker": false,
+    "agent_awareness_max_chars": 300
+  }
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `system_enhancer` | boolean | `true` | Inject current phase, task, and decisions into agent system prompts |
+| `compaction` | boolean | `true` | Enrich session compaction with plan.md and context.md data |
+| `agent_activity` | boolean | `true` | Track tool usage per agent, flush activity summary to context.md |
+| `delegation_tracker` | boolean | `false` | Log delegation chains in chat.message hook (diagnostic, opt-in) |
+| `agent_awareness_max_chars` | number | `300` | Max characters for cross-agent context injection in system prompts |
+
+---
+
+## Context Budget Configuration (v4.3.0)
+
+Monitor and warn about context window usage:
+
+```json
+{
+  "context_budget": {
+    "enabled": true,
+    "warn_threshold": 0.7,
+    "critical_threshold": 0.9,
+    "model_limits": {
+      "default": 128000,
+      "anthropic/claude-sonnet-4-5": 200000
+    }
+  }
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | boolean | `true` | Enable token budget tracking and warnings |
+| `warn_threshold` | number | `0.7` | Inject warning message at this percentage of token limit |
+| `critical_threshold` | number | `0.9` | Inject critical warning at this percentage of token limit |
+| `model_limits` | object | `{ "default": 128000 }` | Token limits per model. Use `"default"` as fallback. |
+
+### How It Works
+
+1. On each message transform, total tokens are estimated across all message parts
+2. Token estimation uses a conservative ratio: `chars × 0.33`
+3. When usage exceeds `warn_threshold`: `[CONTEXT WARNING: ~N% used. Consider summarizing to .swarm/context.md]`
+4. When usage exceeds `critical_threshold`: `[CONTEXT CRITICAL: ~N% used. Offload details immediately]`
+
+---
+
+## Slash Commands (v4.3.0)
+
+Three commands are available under `/swarm`:
+
+### `/swarm status`
+
+Shows current swarm state:
+- Current phase and phase status
+- Task progress (completed / total) in current phase
+- Number of registered agents
+
+```
+Phase: 2 [IN PROGRESS]
+Tasks: 3/5 complete
+Agents: 7 registered
+```
+
+### `/swarm plan`
+
+Displays the full `.swarm/plan.md` content.
+
+### `/swarm plan N`
+
+Displays only Phase N from the plan. Example:
+
+```
+/swarm plan 2
+```
+
+Shows the Phase 2 section including all tasks, dependencies, and status.
+
+### `/swarm agents`
+
+Lists all registered agents with their configuration:
+
+```
+| Agent          | Model                        | Temp | Read-Only |
+|----------------|------------------------------|------|-----------|
+| architect      | anthropic/claude-sonnet-4-5   | 0.1  | No        |
+| explorer       | google/gemini-2.0-flash      | 0.1  | Yes       |
+| coder          | anthropic/claude-sonnet-4-5   | 0.2  | No        |
+| ...            | ...                          | ...  | ...       |
+```

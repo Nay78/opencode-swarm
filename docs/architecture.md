@@ -190,25 +190,45 @@ All tasks in phase done
 ```
 project/
 ├── .swarm/
-│   ├── plan.md        # Phased roadmap with task status
-│   ├── context.md     # Project knowledge, SME cache
+│   ├── plan.md            # Phased roadmap with task status
+│   ├── context.md         # Project knowledge, SME cache
 │   └── history/
-│       ├── phase-1.md # Archived phase summaries
+│       ├── phase-1.md     # Archived phase summaries
 │       └── phase-2.md
 │
-├── src/               # Source code
-│   ├── agents/        # Agent definitions and factory
-│   ├── config/        # Schema, constants, loader
-│   ├── hooks/         # Pipeline tracker
-│   └── tools/         # Domain detector, file extractor, gitingest
+├── src/
+│   ├── index.ts           # Plugin entry — registers 7 hook types
+│   ├── state.ts           # Shared swarm state singleton (zero imports)
+│   ├── agents/            # Agent definitions and factory
+│   ├── config/            # Schema, constants, loader
+│   ├── commands/          # Slash command handlers
+│   │   ├── index.ts       # Factory + dispatcher (createSwarmCommandHandler)
+│   │   ├── status.ts      # /swarm status
+│   │   ├── plan.ts        # /swarm plan [N]
+│   │   └── agents.ts      # /swarm agents
+│   ├── hooks/             # Hook handlers
+│   │   ├── index.ts       # Barrel exports
+│   │   ├── utils.ts       # safeHook, composeHandlers, readSwarmFileAsync, estimateTokens
+│   │   ├── extractors.ts  # Plan/context file parsers
+│   │   ├── pipeline-tracker.ts      # Message transform (pipeline logging)
+│   │   ├── context-budget.ts        # Message transform (token budget warnings)
+│   │   ├── system-enhancer.ts       # System prompt transform + cross-agent context
+│   │   ├── compaction-customizer.ts # Session compaction enrichment
+│   │   ├── agent-activity.ts        # Tool hooks (activity tracking + flush)
+│   │   └── delegation-tracker.ts    # Chat message hook (active agent tracking)
+│   └── tools/             # Domain detector, file extractor, gitingest
 │
-├── tests/unit/        # Unit tests (bun test)
-│   ├── agents/        # Agent creation and factory tests
-│   ├── config/        # Config constants, schema, loader tests
-│   ├── hooks/         # Pipeline tracker tests
-│   └── tools/         # Domain detector, file extractor, gitingest tests
+├── tests/unit/            # 447 tests across 21 files (bun test)
+│   ├── agents/            # creation (64), factory (20)
+│   ├── config/            # constants (14), schema (27), loader (17)
+│   ├── hooks/             # pipeline-tracker (16), utils (25), system-enhancer (39),
+│   │                      # compaction-customizer (26), context-budget (23),
+│   │                      # extractors (32), agent-activity (14), delegation-tracker (16)
+│   ├── commands/          # status (6), plan (9), agents (13), index (11)
+│   ├── tools/             # domain-detector (30), file-extractor (16), gitingest (5)
+│   └── state.test.ts      # Shared state (24)
 │
-└── dist/              # Build output
+└── dist/                  # Build output (ESM)
 ```
 
 ### plan.md Schema
@@ -370,3 +390,123 @@ Persistent `.swarm/` files provide:
 - Knowledge transfer between sessions
 - Audit trail of decisions
 - Cached SME guidance (no re-asking)
+
+---
+
+## Hooks System
+
+The hooks system is the foundation of v4.3.0. All features are built as hook handlers registered on OpenCode's Plugin API.
+
+### Core Utilities
+
+- **`safeHook(handler)`** — Wraps any hook handler in a try/catch. Errors are logged at warning level; the original payload is returned unchanged. This ensures no hook can crash the plugin.
+- **`composeHandlers<I,O>(...handlers)`** — Composes multiple handlers for the same hook type into a single handler. Runs handlers sequentially on shared mutable output. Each handler is individually wrapped in `safeHook`.
+- **`readSwarmFileAsync(directory, filename)`** — Reads `.swarm/` files using `Bun.file().text()`. Returns empty string on missing files.
+- **`estimateTokens(text)`** — Conservative token estimation: `Math.ceil(text.length * 0.33)`.
+
+### Hook Registration Table
+
+| Hook Type | Handler | Purpose |
+|-----------|---------|---------|
+| `experimental.chat.messages.transform` | `composeHandlers(pipelineTracker, contextBudget)` | Pipeline logging + token budget warnings |
+| `experimental.chat.system.transform` | `systemEnhancerHook` | Inject phase/task/decisions + cross-agent context |
+| `experimental.session.compacting` | `compactionHook` | Enrich compaction with plan.md + context.md data |
+| `command.execute.before` | `safeHook(commandHandler)` | Handle `/swarm` slash commands |
+| `tool.execute.before` | `safeHook(activityHooks.toolBefore)` | Track tool usage per agent |
+| `tool.execute.after` | `safeHook(activityHooks.toolAfter)` | Record tool results + trigger flush |
+| `chat.message` | `safeHook(delegationHandler)` | Track active agent per session |
+
+### Composition Constraint
+
+The OpenCode Plugin API allows **one handler per hook type**. When multiple features need the same hook type (e.g., pipeline-tracker and context-budget both use `experimental.chat.messages.transform`), they must be composed via `composeHandlers()` into a single registered handler.
+
+---
+
+## Context Pruning
+
+Context pruning manages the architect's context window to prevent overflow.
+
+### Token Budget Tracker
+
+Registered on `experimental.chat.messages.transform` (composed with pipeline-tracker):
+1. Estimates total tokens across all message parts using `estimateTokens()`
+2. Looks up model-specific token limit from `context_budget.model_limits` config (default: 128,000)
+3. At `warn_threshold` (default 70%): injects `[CONTEXT WARNING]` message
+4. At `critical_threshold` (default 90%): injects `[CONTEXT CRITICAL]` message
+
+### Compaction Enhancement
+
+Registered on `experimental.session.compacting`:
+- Reads `.swarm/plan.md`: extracts current phase + incomplete tasks
+- Reads `.swarm/context.md`: extracts decisions + patterns
+- Injects as compaction context strings (max 500 chars each)
+- Guides OpenCode's built-in compaction to preserve swarm-relevant context
+
+### System Prompt Enhancement
+
+Registered on `experimental.chat.system.transform`:
+- Injects current phase + task from plan.md (~200 chars)
+- Injects top 3 most recent decisions from context.md
+- Keeps agents focused even after conversation history is compacted
+
+---
+
+## Slash Commands
+
+Three commands registered under `/swarm`:
+
+| Command | Description |
+|---------|-------------|
+| `/swarm status` | Shows current phase, task progress (completed/total), and agent count |
+| `/swarm plan` | Displays full plan.md content |
+| `/swarm plan N` | Displays only Phase N from plan.md |
+| `/swarm agents` | Lists all registered agents with model, temperature, and read-only status |
+
+### Implementation
+
+Commands are registered in two steps:
+1. **`config` hook** — Adds `swarm` command to OpenCode's command registry
+2. **`command.execute.before` hook** — Intercepts `/swarm` commands and routes to handlers
+
+The command handler uses a factory pattern: `createSwarmCommandHandler(directory, agents)` creates a closure over the project directory and agent definitions, returning a handler function.
+
+---
+
+## Agent Awareness
+
+Agent awareness tracks what each agent is doing and shares relevant context across agents via system prompts. The architect remains the sole orchestrator — there is no direct inter-agent communication.
+
+### Shared State
+
+`src/state.ts` exports a module-scoped singleton (`swarmState`) with:
+- `activeAgents: Map<sessionId, agentName>` — Which agent is active in each session
+- `eventCounter: number` — Tracks events for flush threshold
+- `flushLock: Promise | null` — Serializes context.md writes
+- `resetSwarmState()` — Clears all state (used in tests)
+
+The module has **zero imports** — it's pure TypeScript with no project dependencies.
+
+### Activity Tracking Flow
+
+```
+chat.message hook                tool.execute.before hook         tool.execute.after hook
+─────────────────               ────────────────────────         ───────────────────────
+│                                │                                │
+├─ Extract agent name            ├─ Read active agent from        ├─ Record tool result
+│  (strip prefix:                │  swarmState                    │  (success heuristic)
+│   paid_, local_,               ├─ Log: "agent X using          ├─ Increment event counter
+│   mega_, default_)             │  tool Y"                       ├─ If counter >= 20:
+├─ Update activeAgents           │                                │  └─ Flush to context.md
+│  map                           │                                │     (promise-based lock)
+│                                │                                │
+```
+
+### Cross-Agent Context Injection
+
+The system-enhancer reads the `## Agent Activity` section from context.md and maps agent names to context labels:
+- `coder` → implementation context
+- `reviewer` → review findings
+- `test_engineer` → test results
+- Other agents → general context
+
+Injected text is truncated to `hooks.agent_awareness_max_chars` (default: 300 characters).

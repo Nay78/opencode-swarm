@@ -9,6 +9,7 @@
  */
 
 import type { PluginConfig } from '../config';
+import { safeHook } from './utils';
 
 const PHASE_REMINDER = `<swarm_reminder>
 ⚠️ ARCHITECT WORKFLOW REMINDER:
@@ -48,18 +49,18 @@ interface MessageWithParts {
  * Only injects for the architect agent.
  */
 export function createPipelineTrackerHook(config: PluginConfig) {
-	const enabled = config.inject_phase_reminders === true; // Default to disabled for now
+	const enabled = config.inject_phase_reminders !== false;
 
 	if (!enabled) {
 		return {};
 	}
 
 	return {
-		'experimental.chat.messages.transform': async (
-			_input: Record<string, never>,
-			output: { messages?: MessageWithParts[] }
-		): Promise<void> => {
-			try {
+		'experimental.chat.messages.transform': safeHook(
+			async (
+				_input: Record<string, never>,
+				output: { messages?: MessageWithParts[] },
+			): Promise<void> => {
 				const messages = output?.messages;
 				if (!messages || messages.length === 0) return;
 
@@ -83,7 +84,7 @@ export function createPipelineTrackerHook(config: PluginConfig) {
 
 				// Find the first text part
 				const textPartIndex = lastUserMessage.parts.findIndex(
-					(p) => p?.type === 'text' && p.text !== undefined
+					(p) => p?.type === 'text' && p.text !== undefined,
 				);
 
 				if (textPartIndex === -1) return;
@@ -92,9 +93,7 @@ export function createPipelineTrackerHook(config: PluginConfig) {
 				const originalText = lastUserMessage.parts[textPartIndex].text ?? '';
 				lastUserMessage.parts[textPartIndex].text =
 					`${PHASE_REMINDER}\n\n---\n\n${originalText}`;
-			} catch {
-				// Silently ignore errors to prevent UI crashes
-			}
-		},
+			},
+		),
 	};
 }

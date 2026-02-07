@@ -21,11 +21,10 @@ RULES:
 - No code writing
 - No delegation`;
 
-
 export function createSMEAgent(
 	model: string,
 	customPrompt?: string,
-	customAppendPrompt?: string
+	customAppendPrompt?: string,
 ): AgentDefinition {
 	let prompt = SME_PROMPT;
 

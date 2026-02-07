@@ -13,10 +13,10 @@ describe('Pipeline Tracker Hook', () => {
       expect(hook).toEqual({});
     });
 
-    it('returns empty object when inject_phase_reminders is not provided', () => {
-      // Test with missing property (will be undefined)
+    it('returns hook when inject_phase_reminders is not provided (defaults to enabled)', () => {
+      // When property is missing/undefined, hook should be enabled (default behavior)
       const hook = createPipelineTrackerHook({ max_iterations: 5, qa_retry_limit: 3 } as any);
-      expect(hook).toEqual({});
+      expect(hook['experimental.chat.messages.transform']).toBeDefined();
     });
   });
 

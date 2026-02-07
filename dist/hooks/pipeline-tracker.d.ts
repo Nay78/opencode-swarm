@@ -29,7 +29,7 @@ interface MessageWithParts {
 export declare function createPipelineTrackerHook(config: PluginConfig): {
     'experimental.chat.messages.transform'?: undefined;
 } | {
-    'experimental.chat.messages.transform': (_input: Record<string, never>, output: {
+    'experimental.chat.messages.transform': (input: Record<string, never>, output: {
         messages?: MessageWithParts[];
     }) => Promise<void>;
 };

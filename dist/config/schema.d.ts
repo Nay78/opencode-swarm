@@ -14,6 +14,21 @@ export declare const SwarmConfigSchema: z.ZodObject<{
     }, z.core.$strip>>>;
 }, z.core.$strip>;
 export type SwarmConfig = z.infer<typeof SwarmConfigSchema>;
+export declare const HooksConfigSchema: z.ZodObject<{
+    system_enhancer: z.ZodDefault<z.ZodBoolean>;
+    compaction: z.ZodDefault<z.ZodBoolean>;
+    agent_activity: z.ZodDefault<z.ZodBoolean>;
+    delegation_tracker: z.ZodDefault<z.ZodBoolean>;
+    agent_awareness_max_chars: z.ZodDefault<z.ZodNumber>;
+}, z.core.$strip>;
+export type HooksConfig = z.infer<typeof HooksConfigSchema>;
+export declare const ContextBudgetConfigSchema: z.ZodObject<{
+    enabled: z.ZodDefault<z.ZodBoolean>;
+    warn_threshold: z.ZodDefault<z.ZodNumber>;
+    critical_threshold: z.ZodDefault<z.ZodNumber>;
+    model_limits: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodNumber>>;
+}, z.core.$strip>;
+export type ContextBudgetConfig = z.infer<typeof ContextBudgetConfigSchema>;
 export declare const PluginConfigSchema: z.ZodObject<{
     agents: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
         model: z.ZodOptional<z.ZodString>;
@@ -31,6 +46,19 @@ export declare const PluginConfigSchema: z.ZodObject<{
     max_iterations: z.ZodDefault<z.ZodNumber>;
     qa_retry_limit: z.ZodDefault<z.ZodNumber>;
     inject_phase_reminders: z.ZodDefault<z.ZodBoolean>;
+    hooks: z.ZodOptional<z.ZodObject<{
+        system_enhancer: z.ZodDefault<z.ZodBoolean>;
+        compaction: z.ZodDefault<z.ZodBoolean>;
+        agent_activity: z.ZodDefault<z.ZodBoolean>;
+        delegation_tracker: z.ZodDefault<z.ZodBoolean>;
+        agent_awareness_max_chars: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strip>>;
+    context_budget: z.ZodOptional<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        warn_threshold: z.ZodDefault<z.ZodNumber>;
+        critical_threshold: z.ZodDefault<z.ZodNumber>;
+        model_limits: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodNumber>>;
+    }, z.core.$strip>>;
 }, z.core.$strip>;
 export type PluginConfig = z.infer<typeof PluginConfigSchema>;
-export type { AgentName, QAAgentName, PipelineAgentName, } from './constants';
+export type { AgentName, PipelineAgentName, QAAgentName, } from './constants';

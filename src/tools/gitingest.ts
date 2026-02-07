@@ -30,7 +30,7 @@ export async function fetchGitingest(args: GitingestArgs): Promise<string> {
 
 	if (!response.ok) {
 		throw new Error(
-			`gitingest API error: ${response.status} ${response.statusText}`
+			`gitingest API error: ${response.status} ${response.statusText}`,
 		);
 	}
 
@@ -60,7 +60,7 @@ export const gitingest: ReturnType<typeof tool> = tool({
 			.enum(['include', 'exclude'])
 			.optional()
 			.describe(
-				'Whether pattern includes or excludes matching files (default: exclude)'
+				'Whether pattern includes or excludes matching files (default: exclude)',
 			),
 	},
 	async execute(args: GitingestArgs, _context: ToolContext) {

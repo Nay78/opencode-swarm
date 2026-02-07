@@ -1,0 +1,401 @@
+import { describe, it, expect } from 'bun:test';
+import { extractCurrentTask, extractIncompleteTasks, extractPatterns } from '../../../src/hooks/extractors';
+
+describe('extractCurrentTask', () => {
+	it('Returns null for empty/falsy input', () => {
+		expect(extractCurrentTask('')).toBeNull();
+		expect(extractCurrentTask(null as any)).toBeNull();
+		expect(extractCurrentTask(undefined as any)).toBeNull();
+		expect(extractCurrentTask('   ')).toBeNull();
+	});
+
+	it('Returns null when no IN PROGRESS phase exists', () => {
+		const content = `# Project Plan
+
+## Phase 1: Setup [COMPLETED]
+- [x] 1.1: Init project
+- [ ] 1.2: Add config
+
+## Phase 2: Development [PENDING]
+- [ ] 2.1: Implement features`;
+		const result = extractCurrentTask(content);
+		expect(result).toBeNull();
+	});
+
+	it('Returns the first `- [ ]` line from the IN PROGRESS phase, trimmed', () => {
+		const content = `# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [x] 1.1: Init project
+- [ ] 1.2: Add config
+- [ ] 1.3: Setup tests
+
+## Phase 2: Development [PENDING]
+- [ ] 2.1: Implement features`;
+		const result = extractCurrentTask(content);
+		expect(result).toBe('- [ ] 1.2: Add config');
+	});
+
+	it('Stops at next `## ` heading', () => {
+		const content = `# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [ ] 1.2: Add config
+- [ ] 1.3: Setup tests
+
+## Phase 2: Development [PENDING]
+- [ ] 2.1: Implement features`;
+		const result = extractCurrentTask(content);
+		expect(result).toBe('- [ ] 1.2: Add config');
+	});
+
+	it('Stops at `---` separator', () => {
+		const content = `# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [ ] 1.2: Add config
+- [ ] 1.3: Setup tests
+---
+## Phase 2: Development [PENDING]
+- [ ] 2.1: Implement features`;
+		const result = extractCurrentTask(content);
+		expect(result).toBe('- [ ] 1.2: Add config');
+	});
+
+	it('Returns only the FIRST incomplete task (not all of them)', () => {
+		const content = `# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [ ] 1.2: Add config
+- [ ] 1.3: Setup tests
+- [ ] 1.4: Write docs
+
+## Phase 2: Development [PENDING]`;
+		const result = extractCurrentTask(content);
+		expect(result).toBe('- [ ] 1.2: Add config');
+	});
+
+	it('Ignores completed tasks (`- [x]`)', () => {
+		const content = `# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [x] 1.1: Init project
+- [x] 1.2: Setup basic config
+- [ ] 1.3: Add advanced config
+
+## Phase 2: Development [PENDING]`;
+		const result = extractCurrentTask(content);
+		expect(result).toBe('- [ ] 1.3: Add advanced config');
+	});
+
+	it('Returns null when IN PROGRESS phase has no incomplete tasks', () => {
+		const content = `# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [x] 1.1: Init project
+- [x] 1.2: Setup basic config
+
+## Phase 2: Development [PENDING]`;
+		const result = extractCurrentTask(content);
+		expect(result).toBeNull();
+	});
+
+	it('Case-insensitive [in progress] matching', () => {
+		const content = `# Project Plan
+
+## Phase 1: Setup [in progress]
+- [ ] 1.2: Add config
+- [x] 1.1: Init project`;
+		const result = extractCurrentTask(content);
+		expect(result).toBe('- [ ] 1.2: Add config');
+	});
+
+	it('Handles tasks with complex formatting', () => {
+		const content = `# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [x] 1.1: Init project **done**
+- [ ] 1.2: Add config ` + '`important` settings' + `
+- [ ] 1.3: Setup *tests* and **docs**`;
+		const result = extractCurrentTask(content);
+		expect(result).toBe('- [ ] 1.2: Add config `important` settings');
+	});
+
+	it('Returns null when IN PROGRESS phase has only completed tasks', () => {
+		const content = `# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [x] 1.1: Init project
+- [x] 1.2: Setup config
+- [x] 1.3: Write tests
+
+## Phase 2: Development [IN PROGRESS]
+- [ ] 2.1: Implement features`;
+		const result = extractCurrentTask(content);
+		expect(result).toBe('- [ ] 2.1: Implement features');
+	});
+});
+
+describe('extractIncompleteTasks', () => {
+	it('Returns null for empty/falsy input', () => {
+		expect(extractIncompleteTasks('')).toBeNull();
+		expect(extractIncompleteTasks(null as any)).toBeNull();
+		expect(extractIncompleteTasks(undefined as any)).toBeNull();
+		expect(extractIncompleteTasks('   ')).toBeNull();
+	});
+
+	it('Returns null when no IN PROGRESS phase exists', () => {
+		const content = `# Project Plan
+
+## Phase 1: Setup [COMPLETED]
+- [x] 1.1: Init project
+- [ ] 1.2: Add config
+
+## Phase 2: Development [PENDING]
+- [ ] 2.1: Implement features`;
+		const result = extractIncompleteTasks(content);
+		expect(result).toBeNull();
+	});
+
+	it('Returns ALL `- [ ]` lines from the IN PROGRESS phase, newline-separated, trimmed', () => {
+		const content = `# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [x] 1.1: Init project
+- [ ] 1.2: Add config
+- [ ] 1.3: Setup tests
+- [ ] 1.4: Write docs
+
+## Phase 2: Development [PENDING]`;
+		const result = extractIncompleteTasks(content);
+		expect(result).toBe('- [ ] 1.2: Add config\n- [ ] 1.3: Setup tests\n- [ ] 1.4: Write docs');
+	});
+
+	it('Stops at next `## ` heading', () => {
+		const content = `# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [ ] 1.2: Add config
+- [ ] 1.3: Setup tests
+
+## Phase 2: Development [PENDING]
+- [ ] 2.1: Implement features`;
+		const result = extractIncompleteTasks(content);
+		expect(result).toBe('- [ ] 1.2: Add config\n- [ ] 1.3: Setup tests');
+	});
+
+	it('Stops at `---` separator', () => {
+		const content = `# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [ ] 1.2: Add config
+- [ ] 1.3: Setup tests
+---
+## Phase 2: Development [PENDING]
+- [ ] 2.1: Implement features`;
+		const result = extractIncompleteTasks(content);
+		expect(result).toBe('- [ ] 1.2: Add config\n- [ ] 1.3: Setup tests');
+	});
+
+	it('Respects maxChars truncation (appends "...")', () => {
+		const longTask = '- [ ] Very long task: ' + 'A'.repeat(600);
+		const content = `# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [ ] Task 1
+${longTask}
+- [ ] Task 3
+
+## Phase 2: Development [PENDING]`;
+		const result = extractIncompleteTasks(content, 50);
+		expect(result).toContain('...');
+		expect(result.length).toBeLessThanOrEqual(50 + 3);
+	});
+
+	it('Default maxChars is 500', () => {
+		const longTask = '- [ ] Very long task: ' + 'A'.repeat(600);
+		const content = `# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+${longTask}`;
+		const result = extractIncompleteTasks(content);
+		if (result) {
+			expect(result).toContain('...');
+			expect(result.length).toBeLessThanOrEqual(500 + 3);
+		}
+	});
+
+	it('Returns null when phase has no incomplete tasks', () => {
+		const content = `# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [x] 1.1: Init project
+- [x] 1.2: Setup config
+
+## Phase 2: Development [PENDING]`;
+		const result = extractIncompleteTasks(content);
+		expect(result).toBeNull();
+	});
+
+	it('Case-insensitive [in progress] matching', () => {
+		const content = `# Project Plan
+
+## Phase 1: Setup [in progress]
+- [ ] Task 1
+- [x] Completed task
+- [ ] Task 2`;
+		const result = extractIncompleteTasks(content);
+		expect(result).toBe('- [ ] Task 1\n- [ ] Task 2');
+	});
+
+	it('Handles multiple tasks with different indentation', () => {
+		const content = `# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [ ] 1.2: Add config
+    - [ ] Subtask 1
+    - [ ] Subtask 2
+- [ ] 1.3: Setup tests
+- [ ] 1.4: Write docs`;
+		const result = extractIncompleteTasks(content);
+		expect(result).toBe('- [ ] 1.2: Add config\n- [ ] Subtask 1\n- [ ] Subtask 2\n- [ ] 1.3: Setup tests\n- [ ] 1.4: Write docs');
+	});
+});
+
+describe('extractPatterns', () => {
+	it('Returns null for empty/falsy input', () => {
+		expect(extractPatterns('')).toBeNull();
+		expect(extractPatterns(null as any)).toBeNull();
+		expect(extractPatterns(undefined as any)).toBeNull();
+		expect(extractPatterns('   ')).toBeNull();
+	});
+
+	it('Returns null when no `## Patterns` section exists', () => {
+		const content = `# Context
+
+## Decisions
+- Decision 1
+- Decision 2
+
+## Other section
+Some content here`;
+		const result = extractPatterns(content);
+		expect(result).toBeNull();
+	});
+
+	it('Extracts `- ` lines under `## Patterns` section', () => {
+		const content = `# Context
+
+## Decisions
+- Decision 1
+- Decision 2
+
+## Patterns
+- Pattern 1: Always use TypeScript
+- Pattern 2: Prefer composition over inheritance
+- Pattern 3: Write comprehensive tests
+
+## Other section
+- Not a pattern`;
+		const result = extractPatterns(content);
+		expect(result).toBe('- Pattern 1: Always use TypeScript\n- Pattern 2: Prefer composition over inheritance\n- Pattern 3: Write comprehensive tests');
+	});
+
+	it('Stops at next `## ` heading', () => {
+		const content = `# Context
+
+## Patterns
+- Pattern 1: Use TypeScript
+- Pattern 2: Write tests
+
+## Decisions
+- Decision 1
+- Decision 2`;
+		const result = extractPatterns(content);
+		expect(result).toBe('- Pattern 1: Use TypeScript\n- Pattern 2: Write tests');
+	});
+
+	it('Only collects lines starting with `- ` (ignores other lines)', () => {
+		const content = `# Context
+
+## Patterns
+- Pattern 1: Use TypeScript
+Some explanatory text
+- Pattern 2: Write tests
+More explanatory text
+- Pattern 3: Document everything`;
+		const result = extractPatterns(content);
+		expect(result).toBe('- Pattern 1: Use TypeScript\n- Pattern 2: Write tests\n- Pattern 3: Document everything');
+	});
+
+	it('Respects maxChars truncation (appends "...")', () => {
+		const longPattern = '- Pattern: ' + 'A'.repeat(600);
+		const content = `# Context
+
+## Patterns
+- Pattern 1: Basic
+${longPattern}
+- Pattern 3: Advanced`;
+		const result = extractPatterns(content, 50);
+		expect(result).toContain('...');
+		expect(result.length).toBeLessThanOrEqual(50 + 3);
+	});
+
+	it('Default maxChars is 500', () => {
+		const longPattern = '- Pattern: ' + 'A'.repeat(600);
+		const content = `# Context
+
+## Patterns
+${longPattern}`;
+		const result = extractPatterns(content);
+		if (result) {
+			expect(result).toContain('...');
+			expect(result.length).toBeLessThanOrEqual(500 + 3);
+		}
+	});
+
+	it('Returns null when Patterns section has no bullet points', () => {
+		const content = `# Context
+
+## Patterns
+Just text, no bullets
+
+## Other section`;
+		const result = extractPatterns(content);
+		expect(result).toBeNull();
+	});
+
+	it('Handles empty Patterns section gracefully', () => {
+		const content = `# Context
+
+## Patterns
+
+## Decisions
+- Decision 1`;
+		const result = extractPatterns(content);
+		expect(result).toBeNull();
+	});
+
+	it('Handles content with no Patterns section', () => {
+		const content = `# Context
+
+## Decisions
+- Decision 1
+
+## Decisions 2
+- Decision 2`;
+		const result = extractPatterns(content);
+		expect(result).toBeNull();
+	});
+
+	it('Extracts patterns with complex formatting', () => {
+		const content = `# Context
+
+## Patterns
+- **Pattern 1**: Always use ` + '`TypeScript`' + ` for new code
+- *Pattern 2*: Prefer **composition** over inheritance
+- Pattern 3: Write *comprehensive* tests **and** documentation`;
+		const result = extractPatterns(content);
+		expect(result).toBe('- **Pattern 1**: Always use `TypeScript` for new code\n- *Pattern 2*: Prefer **composition** over inheritance\n- Pattern 3: Write *comprehensive* tests **and** documentation');
+	});
+});

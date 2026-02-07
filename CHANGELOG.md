@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.0] - 2026-02-07
+### Added
+- **Hooks pipeline system** — `safeHook()` crash-safety wrapper and `composeHandlers()` for composing multiple handlers on the same hook type. Foundation for all v4.3.0 features.
+- **System prompt enhancer** (`experimental.chat.system.transform`) — Injects current phase, task, and key decisions from `.swarm/` files into agent system prompts, keeping agents focused post-compaction.
+- **Session compaction enhancer** (`experimental.session.compacting`) — Enriches OpenCode's built-in session compaction with plan.md phase info and context.md decisions.
+- **Context budget tracker** (`experimental.chat.messages.transform`) — Estimates token usage and injects budget warnings at configurable thresholds (70%/90%). Supports per-model token limits.
+- **Slash commands** — `/swarm status`, `/swarm plan [N]`, `/swarm agents`. Registered via `config` hook and handled via `command.execute.before`.
+- **Agent awareness: activity tracking** — `tool.execute.before`/`tool.execute.after` hooks track tool usage per agent. Flushes activity summary to `context.md` every 20 events with promise-based write lock.
+- **Agent awareness: delegation tracker** — `chat.message` hook tracks active agent per session. Opt-in delegation chain logging (disabled by default).
+- **Agent awareness: cross-agent context injection** — System enhancer reads Agent Activity section from context.md and injects relevant context labels (coder/reviewer/test_engineer) into system prompts. Configurable max chars (default: 300).
+- **Shared swarm state** (`src/state.ts`) — Module-scoped singleton with zero imports. Tracks agent map, event counters, and flush locks. `resetSwarmState()` for testing.
+- **238 new tests** (447 total, up from 209) across 12 new test files covering hooks, commands, state, and agent awareness.
+
+### Changed
+- **System enhancer** now also injects cross-agent context from the Agent Activity section of context.md.
+- **Plugin entry** (`src/index.ts`) registers 7 hook types (up from 1): `experimental.chat.messages.transform`, `experimental.chat.system.transform`, `experimental.session.compacting`, `command.execute.before`, `tool.execute.before`, `tool.execute.after`, `chat.message`.
+- **Pipeline tracker** refactored to use `safeHook()` wrapper.
+- **Config schema** extended with `hooks` and `context_budget` groups for fine-grained feature control.
+
 ## [4.2.0] - 2026-02-07
 ### Added
 - **Comprehensive test suite** — 209 unit tests across 9 test files using Bun's built-in test runner. Zero additional dependencies.

@@ -13575,12 +13575,27 @@ var SwarmConfigSchema = exports_external.object({
   name: exports_external.string().optional(),
   agents: exports_external.record(exports_external.string(), AgentOverrideConfigSchema).optional()
 });
+var HooksConfigSchema = exports_external.object({
+  system_enhancer: exports_external.boolean().default(true),
+  compaction: exports_external.boolean().default(true),
+  agent_activity: exports_external.boolean().default(true),
+  delegation_tracker: exports_external.boolean().default(false),
+  agent_awareness_max_chars: exports_external.number().min(50).max(2000).default(300)
+});
+var ContextBudgetConfigSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  warn_threshold: exports_external.number().min(0).max(1).default(0.7),
+  critical_threshold: exports_external.number().min(0).max(1).default(0.9),
+  model_limits: exports_external.record(exports_external.string(), exports_external.number().min(1000)).default({ default: 128000 })
+});
 var PluginConfigSchema = exports_external.object({
   agents: exports_external.record(exports_external.string(), AgentOverrideConfigSchema).optional(),
   swarms: exports_external.record(exports_external.string(), SwarmConfigSchema).optional(),
   max_iterations: exports_external.number().min(1).max(10).default(5),
   qa_retry_limit: exports_external.number().min(1).max(10).default(3),
-  inject_phase_reminders: exports_external.boolean().default(true)
+  inject_phase_reminders: exports_external.boolean().default(true),
+  hooks: HooksConfigSchema.optional(),
+  context_budget: ContextBudgetConfigSchema.optional()
 });
 // src/config/loader.ts
 import * as fs from "fs";
@@ -14328,6 +14343,577 @@ function getAgentConfigs(config2) {
   }));
 }
 
+// src/commands/agents.ts
+function handleAgentsCommand(agents) {
+  const entries = Object.entries(agents);
+  if (entries.length === 0) {
+    return "No agents registered.";
+  }
+  const lines = ["## Registered Agents", ""];
+  for (const [key, agent] of entries) {
+    const model = agent.config.model || "default";
+    const temp = agent.config.temperature !== undefined ? agent.config.temperature.toString() : "default";
+    const tools = agent.config.tools || {};
+    const isReadOnly = tools.write === false || tools.edit === false;
+    const access = isReadOnly ? "\uD83D\uDD12 read-only" : "\u270F\uFE0F read-write";
+    const desc = agent.description || agent.config.description || "";
+    lines.push(`- **${key}** | model: \`${model}\` | temp: ${temp} | ${access}`);
+    if (desc) {
+      lines.push(`  ${desc}`);
+    }
+  }
+  return lines.join(`
+`);
+}
+
+// src/utils/logger.ts
+var DEBUG = process.env.OPENCODE_SWARM_DEBUG === "1";
+function log(message, data) {
+  if (!DEBUG)
+    return;
+  const timestamp = new Date().toISOString();
+  if (data !== undefined) {
+    console.log(`[opencode-swarm ${timestamp}] ${message}`, data);
+  } else {
+    console.log(`[opencode-swarm ${timestamp}] ${message}`);
+  }
+}
+function warn(message, data) {
+  const timestamp = new Date().toISOString();
+  if (data !== undefined) {
+    console.warn(`[opencode-swarm ${timestamp}] WARN: ${message}`, data);
+  } else {
+    console.warn(`[opencode-swarm ${timestamp}] WARN: ${message}`);
+  }
+}
+// src/hooks/utils.ts
+function safeHook(fn) {
+  return async (input, output) => {
+    try {
+      await fn(input, output);
+    } catch (_error) {
+      const functionName = fn.name || "unknown";
+      warn(`Hook function '${functionName}' failed:`, _error);
+    }
+  };
+}
+function composeHandlers(...fns) {
+  if (fns.length === 0) {
+    return async () => {};
+  }
+  return async (input, output) => {
+    for (const fn of fns) {
+      const safeFn = safeHook(fn);
+      await safeFn(input, output);
+    }
+  };
+}
+async function readSwarmFileAsync(directory, filename) {
+  const path2 = `${directory}/.swarm/${filename}`;
+  try {
+    const file2 = Bun.file(path2);
+    const content = await file2.text();
+    return content;
+  } catch {
+    return null;
+  }
+}
+function estimateTokens(text) {
+  if (!text) {
+    return 0;
+  }
+  return Math.ceil(text.length * 0.33);
+}
+
+// src/commands/plan.ts
+async function handlePlanCommand(directory, args) {
+  const planContent = await readSwarmFileAsync(directory, "plan.md");
+  if (!planContent) {
+    return "No active swarm plan found.";
+  }
+  if (args.length === 0) {
+    return planContent;
+  }
+  const phaseNum = parseInt(args[0], 10);
+  if (Number.isNaN(phaseNum)) {
+    return planContent;
+  }
+  const lines = planContent.split(`
+`);
+  const phaseLines = [];
+  let inTargetPhase = false;
+  for (const line of lines) {
+    const phaseMatch = line.match(/^## Phase (\d+)/);
+    if (phaseMatch) {
+      const num = parseInt(phaseMatch[1], 10);
+      if (num === phaseNum) {
+        inTargetPhase = true;
+        phaseLines.push(line);
+        continue;
+      } else if (inTargetPhase) {
+        break;
+      }
+    }
+    if (inTargetPhase && line.trim() === "---" && phaseLines.length > 1) {
+      break;
+    }
+    if (inTargetPhase) {
+      phaseLines.push(line);
+    }
+  }
+  if (phaseLines.length === 0) {
+    return `Phase ${phaseNum} not found in plan.`;
+  }
+  return phaseLines.join(`
+`).trim();
+}
+
+// src/hooks/extractors.ts
+function extractCurrentPhase(planContent) {
+  if (!planContent) {
+    return null;
+  }
+  const lines = planContent.split(`
+`);
+  for (let i = 0;i < Math.min(20, lines.length); i++) {
+    const line = lines[i].trim();
+    const progressMatch = line.match(/^## Phase (\d+):?\s*(.*?)\s*\[IN PROGRESS\]/i);
+    if (progressMatch) {
+      const phaseNum = progressMatch[1];
+      const description = progressMatch[2]?.trim() || "";
+      return `Phase ${phaseNum}: ${description} [IN PROGRESS]`;
+    }
+  }
+  for (let i = 0;i < Math.min(3, lines.length); i++) {
+    const line = lines[i].trim();
+    const phaseMatch = line.match(/Phase:\s*(\d+)/i);
+    if (phaseMatch) {
+      const phaseNum = phaseMatch[1];
+      return `Phase ${phaseNum} [PENDING]`;
+    }
+  }
+  return null;
+}
+function extractCurrentTask(planContent) {
+  if (!planContent) {
+    return null;
+  }
+  const lines = planContent.split(`
+`);
+  let inCurrentPhase = false;
+  for (const line of lines) {
+    if (line.startsWith("## ") && /\[IN PROGRESS\]/i.test(line)) {
+      inCurrentPhase = true;
+      continue;
+    }
+    if (inCurrentPhase) {
+      if (line.startsWith("## ") || line.trim() === "---") {
+        break;
+      }
+      if (line.trim().startsWith("- [ ]")) {
+        return line.trim();
+      }
+    }
+  }
+  return null;
+}
+function extractDecisions(contextContent, maxChars = 500) {
+  if (!contextContent) {
+    return null;
+  }
+  const lines = contextContent.split(`
+`);
+  let decisionsText = "";
+  let inDecisionsSection = false;
+  for (const line of lines) {
+    if (line.trim() === "## Decisions") {
+      inDecisionsSection = true;
+      continue;
+    }
+    if (inDecisionsSection) {
+      if (line.startsWith("## ")) {
+        break;
+      }
+      if (line.startsWith("- ")) {
+        decisionsText += `${line}
+`;
+      }
+    }
+  }
+  if (!decisionsText.trim()) {
+    return null;
+  }
+  const trimmed = decisionsText.trim();
+  if (trimmed.length <= maxChars) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, maxChars)}...`;
+}
+function extractIncompleteTasks(planContent, maxChars = 500) {
+  if (!planContent) {
+    return null;
+  }
+  const lines = planContent.split(`
+`);
+  let tasksText = "";
+  let inCurrentPhase = false;
+  for (const line of lines) {
+    if (line.startsWith("## ") && /\[IN PROGRESS\]/i.test(line)) {
+      inCurrentPhase = true;
+      continue;
+    }
+    if (inCurrentPhase) {
+      if (line.startsWith("## ") || line.trim() === "---") {
+        break;
+      }
+      if (line.trim().startsWith("- [ ]")) {
+        tasksText += `${line.trim()}
+`;
+      }
+    }
+  }
+  if (!tasksText.trim()) {
+    return null;
+  }
+  const trimmed = tasksText.trim();
+  if (trimmed.length <= maxChars) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, maxChars)}...`;
+}
+function extractPatterns(contextContent, maxChars = 500) {
+  if (!contextContent) {
+    return null;
+  }
+  const lines = contextContent.split(`
+`);
+  let patternsText = "";
+  let inPatternsSection = false;
+  for (const line of lines) {
+    if (line.trim() === "## Patterns") {
+      inPatternsSection = true;
+      continue;
+    }
+    if (inPatternsSection) {
+      if (line.startsWith("## ")) {
+        break;
+      }
+      if (line.startsWith("- ")) {
+        patternsText += `${line}
+`;
+      }
+    }
+  }
+  if (!patternsText.trim()) {
+    return null;
+  }
+  const trimmed = patternsText.trim();
+  if (trimmed.length <= maxChars) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, maxChars)}...`;
+}
+
+// src/commands/status.ts
+async function handleStatusCommand(directory, agents) {
+  const planContent = await readSwarmFileAsync(directory, "plan.md");
+  if (!planContent) {
+    return "No active swarm plan found.";
+  }
+  const currentPhase = extractCurrentPhase(planContent) || "Unknown";
+  const completedTasks = (planContent.match(/^- \[x\]/gm) || []).length;
+  const incompleteTasks = (planContent.match(/^- \[ \]/gm) || []).length;
+  const totalTasks = completedTasks + incompleteTasks;
+  const agentCount = Object.keys(agents).length;
+  const lines = [
+    "## Swarm Status",
+    "",
+    `**Current Phase**: ${currentPhase}`,
+    `**Tasks**: ${completedTasks}/${totalTasks} complete`,
+    `**Agents**: ${agentCount} registered`
+  ];
+  return lines.join(`
+`);
+}
+
+// src/commands/index.ts
+var HELP_TEXT = [
+  "## Swarm Commands",
+  "",
+  "- `/swarm status` \u2014 Show current swarm state",
+  "- `/swarm plan [phase]` \u2014 Show plan (optionally filter by phase number)",
+  "- `/swarm agents` \u2014 List registered agents"
+].join(`
+`);
+function createSwarmCommandHandler(directory, agents) {
+  return async (input, output) => {
+    if (input.command !== "swarm") {
+      return;
+    }
+    const tokens = input.arguments.trim().split(/\s+/).filter(Boolean);
+    const [subcommand, ...args] = tokens;
+    let text;
+    switch (subcommand) {
+      case "status":
+        text = await handleStatusCommand(directory, agents);
+        break;
+      case "plan":
+        text = await handlePlanCommand(directory, args);
+        break;
+      case "agents":
+        text = handleAgentsCommand(agents);
+        break;
+      default:
+        text = HELP_TEXT;
+        break;
+    }
+    output.parts = [
+      { type: "text", text }
+    ];
+  };
+}
+
+// src/state.ts
+var swarmState = {
+  activeToolCalls: new Map,
+  toolAggregates: new Map,
+  activeAgent: new Map,
+  delegationChains: new Map,
+  pendingEvents: 0
+};
+
+// src/hooks/agent-activity.ts
+function createAgentActivityHooks(config2, directory) {
+  if (config2.hooks?.agent_activity === false) {
+    return {
+      toolBefore: async () => {},
+      toolAfter: async () => {}
+    };
+  }
+  return {
+    toolBefore: async (input) => {
+      swarmState.activeToolCalls.set(input.callID, {
+        tool: input.tool,
+        sessionID: input.sessionID,
+        callID: input.callID,
+        startTime: Date.now()
+      });
+    },
+    toolAfter: async (input, output) => {
+      const entry = swarmState.activeToolCalls.get(input.callID);
+      if (!entry)
+        return;
+      swarmState.activeToolCalls.delete(input.callID);
+      const duration3 = Date.now() - entry.startTime;
+      const success2 = output.output != null;
+      const key = entry.tool;
+      const existing = swarmState.toolAggregates.get(key) ?? {
+        tool: key,
+        count: 0,
+        successCount: 0,
+        failureCount: 0,
+        totalDuration: 0
+      };
+      existing.count++;
+      if (success2)
+        existing.successCount++;
+      else
+        existing.failureCount++;
+      existing.totalDuration += duration3;
+      swarmState.toolAggregates.set(key, existing);
+      swarmState.pendingEvents++;
+      if (swarmState.pendingEvents >= 20) {
+        flushActivityToFile(directory).catch((err) => warn("Agent activity flush trigger failed:", err));
+      }
+    }
+  };
+}
+var flushPromise = null;
+async function flushActivityToFile(directory) {
+  if (flushPromise) {
+    flushPromise = flushPromise.then(() => doFlush(directory)).catch((err) => {
+      warn("Queued agent activity flush failed:", err);
+    });
+    return flushPromise;
+  }
+  flushPromise = doFlush(directory);
+  try {
+    await flushPromise;
+  } finally {
+    flushPromise = null;
+  }
+}
+async function doFlush(directory) {
+  try {
+    const content = await readSwarmFileAsync(directory, "context.md");
+    const existing = content ?? "";
+    const activitySection = renderActivitySection();
+    const updated = replaceOrAppendSection(existing, "## Agent Activity", activitySection);
+    const flushedCount = swarmState.pendingEvents;
+    const path2 = `${directory}/.swarm/context.md`;
+    await Bun.write(path2, updated);
+    swarmState.pendingEvents = Math.max(0, swarmState.pendingEvents - flushedCount);
+  } catch (error49) {
+    warn("Agent activity flush failed:", error49);
+  }
+}
+function renderActivitySection() {
+  const lines = ["## Agent Activity", ""];
+  if (swarmState.toolAggregates.size === 0) {
+    lines.push("No tool activity recorded yet.");
+    return lines.join(`
+`);
+  }
+  lines.push("| Tool | Calls | Success | Failed | Avg Duration |");
+  lines.push("|------|-------|---------|--------|--------------|");
+  const sorted = [...swarmState.toolAggregates.values()].sort((a, b) => b.count - a.count);
+  for (const agg of sorted) {
+    const avgDuration = agg.count > 0 ? Math.round(agg.totalDuration / agg.count) : 0;
+    lines.push(`| ${agg.tool} | ${agg.count} | ${agg.successCount} | ${agg.failureCount} | ${avgDuration}ms |`);
+  }
+  return lines.join(`
+`);
+}
+function replaceOrAppendSection(content, heading, newSection) {
+  const headingIndex = content.indexOf(heading);
+  if (headingIndex === -1) {
+    return content.trimEnd() + `
+
+` + newSection + `
+`;
+  }
+  const afterHeading = content.substring(headingIndex + heading.length);
+  const nextHeadingMatch = afterHeading.match(/\n## /);
+  if (nextHeadingMatch && nextHeadingMatch.index !== undefined) {
+    const endIndex = headingIndex + heading.length + nextHeadingMatch.index;
+    return content.substring(0, headingIndex) + newSection + `
+` + content.substring(endIndex + 1);
+  }
+  return content.substring(0, headingIndex) + newSection + `
+`;
+}
+// src/hooks/compaction-customizer.ts
+function createCompactionCustomizerHook(config2, directory) {
+  const enabled = config2.hooks?.compaction !== false;
+  if (!enabled) {
+    return {};
+  }
+  return {
+    "experimental.session.compacting": safeHook(async (_input, output) => {
+      const planContent = await readSwarmFileAsync(directory, "plan.md");
+      const contextContent = await readSwarmFileAsync(directory, "context.md");
+      if (planContent) {
+        const currentPhase = extractCurrentPhase(planContent);
+        if (currentPhase) {
+          output.context.push(`[SWARM PLAN] ${currentPhase}`);
+        }
+      }
+      if (contextContent) {
+        const decisionsSummary = extractDecisions(contextContent);
+        if (decisionsSummary) {
+          output.context.push(`[SWARM DECISIONS] ${decisionsSummary}`);
+        }
+      }
+      if (planContent) {
+        const incompleteTasks = extractIncompleteTasks(planContent);
+        if (incompleteTasks) {
+          output.context.push(`[SWARM TASKS] ${incompleteTasks}`);
+        }
+      }
+      if (contextContent) {
+        const patterns = extractPatterns(contextContent);
+        if (patterns) {
+          output.context.push(`[SWARM PATTERNS] ${patterns}`);
+        }
+      }
+    })
+  };
+}
+// src/hooks/context-budget.ts
+function createContextBudgetHandler(config2) {
+  const enabled = config2.context_budget?.enabled !== false;
+  if (!enabled) {
+    return async (_input, _output) => {};
+  }
+  const warnThreshold = config2.context_budget?.warn_threshold ?? 0.7;
+  const criticalThreshold = config2.context_budget?.critical_threshold ?? 0.9;
+  const modelLimits = config2.context_budget?.model_limits ?? {
+    default: 128000
+  };
+  const modelLimit = modelLimits.default ?? 128000;
+  return async (_input, output) => {
+    const messages = output?.messages;
+    if (!messages || messages.length === 0)
+      return;
+    let totalTokens = 0;
+    for (const message of messages) {
+      if (!message?.parts)
+        continue;
+      for (const part of message.parts) {
+        if (part?.type === "text" && part.text) {
+          totalTokens += estimateTokens(part.text);
+        }
+      }
+    }
+    const usagePercent = totalTokens / modelLimit;
+    let lastUserMessageIndex = -1;
+    for (let i = messages.length - 1;i >= 0; i--) {
+      if (messages[i]?.info?.role === "user") {
+        lastUserMessageIndex = i;
+        break;
+      }
+    }
+    if (lastUserMessageIndex === -1)
+      return;
+    const lastUserMessage = messages[lastUserMessageIndex];
+    if (!lastUserMessage?.parts)
+      return;
+    const agent = lastUserMessage.info?.agent;
+    if (agent && agent !== "architect")
+      return;
+    const textPartIndex = lastUserMessage.parts.findIndex((p) => p?.type === "text" && p.text !== undefined);
+    if (textPartIndex === -1)
+      return;
+    const pct = Math.round(usagePercent * 100);
+    let warningText = "";
+    if (usagePercent > criticalThreshold) {
+      warningText = `[CONTEXT CRITICAL: ~${pct}% of context budget used. Offload details to .swarm/context.md immediately]
+
+`;
+    } else if (usagePercent > warnThreshold) {
+      warningText = `[CONTEXT WARNING: ~${pct}% of context budget used. Consider summarizing to .swarm/context.md]
+
+`;
+    }
+    if (warningText) {
+      const originalText = lastUserMessage.parts[textPartIndex].text ?? "";
+      lastUserMessage.parts[textPartIndex].text = `${warningText}${originalText}`;
+    }
+  };
+}
+// src/hooks/delegation-tracker.ts
+function createDelegationTrackerHook(config2) {
+  return async (input, _output) => {
+    if (!input.agent || input.agent === "") {
+      return;
+    }
+    const previousAgent = swarmState.activeAgent.get(input.sessionID);
+    swarmState.activeAgent.set(input.sessionID, input.agent);
+    if (config2.hooks?.delegation_tracker === true && previousAgent && previousAgent !== input.agent) {
+      const entry = {
+        from: previousAgent,
+        to: input.agent,
+        timestamp: Date.now()
+      };
+      if (!swarmState.delegationChains.has(input.sessionID)) {
+        swarmState.delegationChains.set(input.sessionID, []);
+      }
+      const chain = swarmState.delegationChains.get(input.sessionID);
+      chain?.push(entry);
+      swarmState.pendingEvents++;
+    }
+  };
+}
 // src/hooks/pipeline-tracker.ts
 var PHASE_REMINDER = `<swarm_reminder>
 \u26A0\uFE0F ARCHITECT WORKFLOW REMINDER:
@@ -14345,43 +14931,115 @@ DELEGATION RULES:
 - Always wait for response before next delegation
 </swarm_reminder>`;
 function createPipelineTrackerHook(config2) {
-  const enabled = config2.inject_phase_reminders === true;
+  const enabled = config2.inject_phase_reminders !== false;
   if (!enabled) {
     return {};
   }
   return {
-    "experimental.chat.messages.transform": async (_input, output) => {
-      try {
-        const messages = output?.messages;
-        if (!messages || messages.length === 0)
-          return;
-        let lastUserMessageIndex = -1;
-        for (let i = messages.length - 1;i >= 0; i--) {
-          if (messages[i]?.info?.role === "user") {
-            lastUserMessageIndex = i;
-            break;
-          }
+    "experimental.chat.messages.transform": safeHook(async (_input, output) => {
+      const messages = output?.messages;
+      if (!messages || messages.length === 0)
+        return;
+      let lastUserMessageIndex = -1;
+      for (let i = messages.length - 1;i >= 0; i--) {
+        if (messages[i]?.info?.role === "user") {
+          lastUserMessageIndex = i;
+          break;
         }
-        if (lastUserMessageIndex === -1)
-          return;
-        const lastUserMessage = messages[lastUserMessageIndex];
-        if (!lastUserMessage?.parts)
-          return;
-        const agent = lastUserMessage.info?.agent;
-        if (agent && agent !== "architect")
-          return;
-        const textPartIndex = lastUserMessage.parts.findIndex((p) => p?.type === "text" && p.text !== undefined);
-        if (textPartIndex === -1)
-          return;
-        const originalText = lastUserMessage.parts[textPartIndex].text ?? "";
-        lastUserMessage.parts[textPartIndex].text = `${PHASE_REMINDER}
+      }
+      if (lastUserMessageIndex === -1)
+        return;
+      const lastUserMessage = messages[lastUserMessageIndex];
+      if (!lastUserMessage?.parts)
+        return;
+      const agent = lastUserMessage.info?.agent;
+      if (agent && agent !== "architect")
+        return;
+      const textPartIndex = lastUserMessage.parts.findIndex((p) => p?.type === "text" && p.text !== undefined);
+      if (textPartIndex === -1)
+        return;
+      const originalText = lastUserMessage.parts[textPartIndex].text ?? "";
+      lastUserMessage.parts[textPartIndex].text = `${PHASE_REMINDER}
 
 ---
 
 ${originalText}`;
-      } catch {}
-    }
+    })
   };
+}
+// src/hooks/system-enhancer.ts
+function createSystemEnhancerHook(config2, directory) {
+  const enabled = config2.hooks?.system_enhancer !== false;
+  if (!enabled) {
+    return {};
+  }
+  return {
+    "experimental.chat.system.transform": safeHook(async (_input, output) => {
+      try {
+        const planContent = await readSwarmFileAsync(directory, "plan.md");
+        const contextContent = await readSwarmFileAsync(directory, "context.md");
+        if (planContent) {
+          const currentPhase = extractCurrentPhase(planContent);
+          if (currentPhase) {
+            output.system.push(`[SWARM CONTEXT] Current phase: ${currentPhase}`);
+          }
+          const currentTask = extractCurrentTask(planContent);
+          if (currentTask) {
+            output.system.push(`[SWARM CONTEXT] Current task: ${currentTask}`);
+          }
+        }
+        if (contextContent) {
+          const decisions = extractDecisions(contextContent, 200);
+          if (decisions) {
+            output.system.push(`[SWARM CONTEXT] Key decisions: ${decisions}`);
+          }
+          if (config2.hooks?.agent_activity !== false && _input.sessionID) {
+            const activeAgent = swarmState.activeAgent.get(_input.sessionID);
+            if (activeAgent) {
+              const agentContext = extractAgentContext(contextContent, activeAgent, config2.hooks?.agent_awareness_max_chars ?? 300);
+              if (agentContext) {
+                output.system.push(`[SWARM AGENT CONTEXT] ${agentContext}`);
+              }
+            }
+          }
+        }
+      } catch (error49) {
+        warn("System enhancer failed:", error49);
+      }
+    })
+  };
+}
+function extractAgentContext(contextContent, activeAgent, maxChars) {
+  const activityMatch = contextContent.match(/## Agent Activity\n([\s\S]*?)(?=\n## |$)/);
+  if (!activityMatch)
+    return null;
+  const activitySection = activityMatch[1].trim();
+  if (!activitySection || activitySection === "No tool activity recorded yet.")
+    return null;
+  const agentName = activeAgent.replace(/^(?:paid|local|mega|default)_/, "");
+  let contextSummary;
+  switch (agentName) {
+    case "coder":
+      contextSummary = `Recent tool activity for review context:
+${activitySection}`;
+      break;
+    case "reviewer":
+      contextSummary = `Tool usage to review:
+${activitySection}`;
+      break;
+    case "test_engineer":
+      contextSummary = `Tool activity for test context:
+${activitySection}`;
+      break;
+    default:
+      contextSummary = `Agent activity summary:
+${activitySection}`;
+      break;
+  }
+  if (contextSummary.length > maxChars) {
+    return contextSummary.substring(0, maxChars - 3) + "...";
+  }
+  return contextSummary;
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/classic/external.js
 var exports_external2 = {};
@@ -15592,10 +16250,10 @@ var initializer3 = (inst, def) => {
 };
 var $ZodError2 = $constructor2("$ZodError", initializer3);
 var $ZodRealError2 = $constructor2("$ZodError", initializer3, { Parent: Error });
-function flattenError2(error48, mapper = (issue3) => issue3.message) {
+function flattenError2(error49, mapper = (issue3) => issue3.message) {
   const fieldErrors = {};
   const formErrors = [];
-  for (const sub of error48.issues) {
+  for (const sub of error49.issues) {
     if (sub.path.length > 0) {
       fieldErrors[sub.path[0]] = fieldErrors[sub.path[0]] || [];
       fieldErrors[sub.path[0]].push(mapper(sub));
@@ -15605,13 +16263,13 @@ function flattenError2(error48, mapper = (issue3) => issue3.message) {
   }
   return { formErrors, fieldErrors };
 }
-function formatError2(error48, _mapper) {
+function formatError2(error49, _mapper) {
   const mapper = _mapper || function(issue3) {
     return issue3.message;
   };
   const fieldErrors = { _errors: [] };
-  const processError = (error49) => {
-    for (const issue3 of error49.issues) {
+  const processError = (error50) => {
+    for (const issue3 of error50.issues) {
       if (issue3.code === "invalid_union" && issue3.errors.length) {
         issue3.errors.map((issues) => processError({ issues }));
       } else if (issue3.code === "invalid_key") {
@@ -15638,17 +16296,17 @@ function formatError2(error48, _mapper) {
       }
     }
   };
-  processError(error48);
+  processError(error49);
   return fieldErrors;
 }
-function treeifyError2(error48, _mapper) {
+function treeifyError2(error49, _mapper) {
   const mapper = _mapper || function(issue3) {
     return issue3.message;
   };
   const result = { errors: [] };
-  const processError = (error49, path2 = []) => {
+  const processError = (error50, path2 = []) => {
     var _a2, _b;
-    for (const issue3 of error49.issues) {
+    for (const issue3 of error50.issues) {
       if (issue3.code === "invalid_union" && issue3.errors.length) {
         issue3.errors.map((issues) => processError({ issues }, issue3.path));
       } else if (issue3.code === "invalid_key") {
@@ -15683,7 +16341,7 @@ function treeifyError2(error48, _mapper) {
       }
     }
   };
-  processError(error48);
+  processError(error49);
   return result;
 }
 function toDotPath2(_path) {
@@ -15704,9 +16362,9 @@ function toDotPath2(_path) {
   }
   return segs.join("");
 }
-function prettifyError2(error48) {
+function prettifyError2(error49) {
   const lines = [];
-  const issues = [...error48.issues].sort((a, b) => (a.path ?? []).length - (b.path ?? []).length);
+  const issues = [...error49.issues].sort((a, b) => (a.path ?? []).length - (b.path ?? []).length);
   for (const issue3 of issues) {
     lines.push(`\u2716 ${issue3.message}`);
     if (issue3.path?.length)
@@ -18416,7 +19074,7 @@ __export(exports_locales2, {
 });
 
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ar.js
-var error48 = () => {
+var error49 = () => {
   const Sizable = {
     string: { unit: "\u062D\u0631\u0641", verb: "\u0623\u0646 \u064A\u062D\u0648\u064A" },
     file: { unit: "\u0628\u0627\u064A\u062A", verb: "\u0623\u0646 \u064A\u062D\u0648\u064A" },
@@ -18528,11 +19186,11 @@ var error48 = () => {
 };
 function ar_default2() {
   return {
-    localeError: error48()
+    localeError: error49()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/az.js
-var error49 = () => {
+var error50 = () => {
   const Sizable = {
     string: { unit: "simvol", verb: "olmal\u0131d\u0131r" },
     file: { unit: "bayt", verb: "olmal\u0131d\u0131r" },
@@ -18643,7 +19301,7 @@ var error49 = () => {
 };
 function az_default2() {
   return {
-    localeError: error49()
+    localeError: error50()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/be.js
@@ -18662,7 +19320,7 @@ function getBelarusianPlural2(count, one, few, many) {
   }
   return many;
 }
-var error50 = () => {
+var error51 = () => {
   const Sizable = {
     string: {
       unit: {
@@ -18807,11 +19465,11 @@ var error50 = () => {
 };
 function be_default2() {
   return {
-    localeError: error50()
+    localeError: error51()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ca.js
-var error51 = () => {
+var error52 = () => {
   const Sizable = {
     string: { unit: "car\xE0cters", verb: "contenir" },
     file: { unit: "bytes", verb: "contenir" },
@@ -18924,11 +19582,11 @@ var error51 = () => {
 };
 function ca_default2() {
   return {
-    localeError: error51()
+    localeError: error52()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/cs.js
-var error52 = () => {
+var error53 = () => {
   const Sizable = {
     string: { unit: "znak\u016F", verb: "m\xEDt" },
     file: { unit: "bajt\u016F", verb: "m\xEDt" },
@@ -19059,11 +19717,11 @@ var error52 = () => {
 };
 function cs_default2() {
   return {
-    localeError: error52()
+    localeError: error53()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/da.js
-var error53 = () => {
+var error54 = () => {
   const Sizable = {
     string: { unit: "tegn", verb: "havde" },
     file: { unit: "bytes", verb: "havde" },
@@ -19190,11 +19848,11 @@ var error53 = () => {
 };
 function da_default2() {
   return {
-    localeError: error53()
+    localeError: error54()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/de.js
-var error54 = () => {
+var error55 = () => {
   const Sizable = {
     string: { unit: "Zeichen", verb: "zu haben" },
     file: { unit: "Bytes", verb: "zu haben" },
@@ -19306,7 +19964,7 @@ var error54 = () => {
 };
 function de_default2() {
   return {
-    localeError: error54()
+    localeError: error55()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/en.js
@@ -19330,7 +19988,7 @@ var parsedType2 = (data) => {
   }
   return t;
 };
-var error55 = () => {
+var error56 = () => {
   const Sizable = {
     string: { unit: "characters", verb: "to have" },
     file: { unit: "bytes", verb: "to have" },
@@ -19423,7 +20081,7 @@ var error55 = () => {
 };
 function en_default2() {
   return {
-    localeError: error55()
+    localeError: error56()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/eo.js
@@ -19447,7 +20105,7 @@ var parsedType3 = (data) => {
   }
   return t;
 };
-var error56 = () => {
+var error57 = () => {
   const Sizable = {
     string: { unit: "karaktrojn", verb: "havi" },
     file: { unit: "bajtojn", verb: "havi" },
@@ -19539,11 +20197,11 @@ var error56 = () => {
 };
 function eo_default2() {
   return {
-    localeError: error56()
+    localeError: error57()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/es.js
-var error57 = () => {
+var error58 = () => {
   const Sizable = {
     string: { unit: "caracteres", verb: "tener" },
     file: { unit: "bytes", verb: "tener" },
@@ -19687,11 +20345,11 @@ var error57 = () => {
 };
 function es_default2() {
   return {
-    localeError: error57()
+    localeError: error58()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/fa.js
-var error58 = () => {
+var error59 = () => {
   const Sizable = {
     string: { unit: "\u06A9\u0627\u0631\u0627\u06A9\u062A\u0631", verb: "\u062F\u0627\u0634\u062A\u0647 \u0628\u0627\u0634\u062F" },
     file: { unit: "\u0628\u0627\u06CC\u062A", verb: "\u062F\u0627\u0634\u062A\u0647 \u0628\u0627\u0634\u062F" },
@@ -19809,11 +20467,11 @@ var error58 = () => {
 };
 function fa_default2() {
   return {
-    localeError: error58()
+    localeError: error59()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/fi.js
-var error59 = () => {
+var error60 = () => {
   const Sizable = {
     string: { unit: "merkki\xE4", subject: "merkkijonon" },
     file: { unit: "tavua", subject: "tiedoston" },
@@ -19931,11 +20589,11 @@ var error59 = () => {
 };
 function fi_default2() {
   return {
-    localeError: error59()
+    localeError: error60()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/fr.js
-var error60 = () => {
+var error61 = () => {
   const Sizable = {
     string: { unit: "caract\xE8res", verb: "avoir" },
     file: { unit: "octets", verb: "avoir" },
@@ -20047,11 +20705,11 @@ var error60 = () => {
 };
 function fr_default2() {
   return {
-    localeError: error60()
+    localeError: error61()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/fr-CA.js
-var error61 = () => {
+var error62 = () => {
   const Sizable = {
     string: { unit: "caract\xE8res", verb: "avoir" },
     file: { unit: "octets", verb: "avoir" },
@@ -20164,11 +20822,11 @@ var error61 = () => {
 };
 function fr_CA_default2() {
   return {
-    localeError: error61()
+    localeError: error62()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/he.js
-var error62 = () => {
+var error63 = () => {
   const Sizable = {
     string: { unit: "\u05D0\u05D5\u05EA\u05D9\u05D5\u05EA", verb: "\u05DC\u05DB\u05DC\u05D5\u05DC" },
     file: { unit: "\u05D1\u05D9\u05D9\u05D8\u05D9\u05DD", verb: "\u05DC\u05DB\u05DC\u05D5\u05DC" },
@@ -20280,11 +20938,11 @@ var error62 = () => {
 };
 function he_default2() {
   return {
-    localeError: error62()
+    localeError: error63()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/hu.js
-var error63 = () => {
+var error64 = () => {
   const Sizable = {
     string: { unit: "karakter", verb: "legyen" },
     file: { unit: "byte", verb: "legyen" },
@@ -20396,11 +21054,11 @@ var error63 = () => {
 };
 function hu_default2() {
   return {
-    localeError: error63()
+    localeError: error64()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/id.js
-var error64 = () => {
+var error65 = () => {
   const Sizable = {
     string: { unit: "karakter", verb: "memiliki" },
     file: { unit: "byte", verb: "memiliki" },
@@ -20512,7 +21170,7 @@ var error64 = () => {
 };
 function id_default2() {
   return {
-    localeError: error64()
+    localeError: error65()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/is.js
@@ -20536,7 +21194,7 @@ var parsedType4 = (data) => {
   }
   return t;
 };
-var error65 = () => {
+var error66 = () => {
   const Sizable = {
     string: { unit: "stafi", verb: "a\xF0 hafa" },
     file: { unit: "b\xE6ti", verb: "a\xF0 hafa" },
@@ -20629,11 +21287,11 @@ var error65 = () => {
 };
 function is_default2() {
   return {
-    localeError: error65()
+    localeError: error66()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/it.js
-var error66 = () => {
+var error67 = () => {
   const Sizable = {
     string: { unit: "caratteri", verb: "avere" },
     file: { unit: "byte", verb: "avere" },
@@ -20745,11 +21403,11 @@ var error66 = () => {
 };
 function it_default2() {
   return {
-    localeError: error66()
+    localeError: error67()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ja.js
-var error67 = () => {
+var error68 = () => {
   const Sizable = {
     string: { unit: "\u6587\u5B57", verb: "\u3067\u3042\u308B" },
     file: { unit: "\u30D0\u30A4\u30C8", verb: "\u3067\u3042\u308B" },
@@ -20860,7 +21518,7 @@ var error67 = () => {
 };
 function ja_default2() {
   return {
-    localeError: error67()
+    localeError: error68()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ka.js
@@ -20892,7 +21550,7 @@ var parsedType5 = (data) => {
   };
   return typeMap[t] ?? t;
 };
-var error68 = () => {
+var error69 = () => {
   const Sizable = {
     string: { unit: "\u10E1\u10D8\u10DB\u10D1\u10DD\u10DA\u10DD", verb: "\u10E3\u10DC\u10D3\u10D0 \u10E8\u10D4\u10D8\u10EA\u10D0\u10D5\u10D3\u10D4\u10E1" },
     file: { unit: "\u10D1\u10D0\u10D8\u10E2\u10D8", verb: "\u10E3\u10DC\u10D3\u10D0 \u10E8\u10D4\u10D8\u10EA\u10D0\u10D5\u10D3\u10D4\u10E1" },
@@ -20985,11 +21643,11 @@ var error68 = () => {
 };
 function ka_default2() {
   return {
-    localeError: error68()
+    localeError: error69()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/km.js
-var error69 = () => {
+var error70 = () => {
   const Sizable = {
     string: { unit: "\u178F\u17BD\u17A2\u1780\u17D2\u179F\u179A", verb: "\u1782\u17BD\u179A\u1798\u17B6\u1793" },
     file: { unit: "\u1794\u17C3", verb: "\u1782\u17BD\u179A\u1798\u17B6\u1793" },
@@ -21102,7 +21760,7 @@ var error69 = () => {
 };
 function km_default2() {
   return {
-    localeError: error69()
+    localeError: error70()
   };
 }
 
@@ -21111,7 +21769,7 @@ function kh_default2() {
   return km_default2();
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ko.js
-var error70 = () => {
+var error71 = () => {
   const Sizable = {
     string: { unit: "\uBB38\uC790", verb: "to have" },
     file: { unit: "\uBC14\uC774\uD2B8", verb: "to have" },
@@ -21228,7 +21886,7 @@ var error70 = () => {
 };
 function ko_default2() {
   return {
-    localeError: error70()
+    localeError: error71()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/lt.js
@@ -21291,7 +21949,7 @@ function getUnitTypeFromNumber2(number5) {
     return "one";
   return "few";
 }
-var error71 = () => {
+var error72 = () => {
   const Sizable = {
     string: {
       unit: {
@@ -21457,11 +22115,11 @@ var error71 = () => {
 };
 function lt_default2() {
   return {
-    localeError: error71()
+    localeError: error72()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/mk.js
-var error72 = () => {
+var error73 = () => {
   const Sizable = {
     string: { unit: "\u0437\u043D\u0430\u0446\u0438", verb: "\u0434\u0430 \u0438\u043C\u0430\u0430\u0442" },
     file: { unit: "\u0431\u0430\u0458\u0442\u0438", verb: "\u0434\u0430 \u0438\u043C\u0430\u0430\u0442" },
@@ -21574,11 +22232,11 @@ var error72 = () => {
 };
 function mk_default2() {
   return {
-    localeError: error72()
+    localeError: error73()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ms.js
-var error73 = () => {
+var error74 = () => {
   const Sizable = {
     string: { unit: "aksara", verb: "mempunyai" },
     file: { unit: "bait", verb: "mempunyai" },
@@ -21690,11 +22348,11 @@ var error73 = () => {
 };
 function ms_default2() {
   return {
-    localeError: error73()
+    localeError: error74()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/nl.js
-var error74 = () => {
+var error75 = () => {
   const Sizable = {
     string: { unit: "tekens" },
     file: { unit: "bytes" },
@@ -21807,11 +22465,11 @@ var error74 = () => {
 };
 function nl_default2() {
   return {
-    localeError: error74()
+    localeError: error75()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/no.js
-var error75 = () => {
+var error76 = () => {
   const Sizable = {
     string: { unit: "tegn", verb: "\xE5 ha" },
     file: { unit: "bytes", verb: "\xE5 ha" },
@@ -21923,11 +22581,11 @@ var error75 = () => {
 };
 function no_default2() {
   return {
-    localeError: error75()
+    localeError: error76()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ota.js
-var error76 = () => {
+var error77 = () => {
   const Sizable = {
     string: { unit: "harf", verb: "olmal\u0131d\u0131r" },
     file: { unit: "bayt", verb: "olmal\u0131d\u0131r" },
@@ -22039,11 +22697,11 @@ var error76 = () => {
 };
 function ota_default2() {
   return {
-    localeError: error76()
+    localeError: error77()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ps.js
-var error77 = () => {
+var error78 = () => {
   const Sizable = {
     string: { unit: "\u062A\u0648\u06A9\u064A", verb: "\u0648\u0644\u0631\u064A" },
     file: { unit: "\u0628\u0627\u06CC\u067C\u0633", verb: "\u0648\u0644\u0631\u064A" },
@@ -22161,11 +22819,11 @@ var error77 = () => {
 };
 function ps_default2() {
   return {
-    localeError: error77()
+    localeError: error78()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/pl.js
-var error78 = () => {
+var error79 = () => {
   const Sizable = {
     string: { unit: "znak\xF3w", verb: "mie\u0107" },
     file: { unit: "bajt\xF3w", verb: "mie\u0107" },
@@ -22278,11 +22936,11 @@ var error78 = () => {
 };
 function pl_default2() {
   return {
-    localeError: error78()
+    localeError: error79()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/pt.js
-var error79 = () => {
+var error80 = () => {
   const Sizable = {
     string: { unit: "caracteres", verb: "ter" },
     file: { unit: "bytes", verb: "ter" },
@@ -22394,7 +23052,7 @@ var error79 = () => {
 };
 function pt_default2() {
   return {
-    localeError: error79()
+    localeError: error80()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ru.js
@@ -22413,7 +23071,7 @@ function getRussianPlural2(count, one, few, many) {
   }
   return many;
 }
-var error80 = () => {
+var error81 = () => {
   const Sizable = {
     string: {
       unit: {
@@ -22558,11 +23216,11 @@ var error80 = () => {
 };
 function ru_default2() {
   return {
-    localeError: error80()
+    localeError: error81()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/sl.js
-var error81 = () => {
+var error82 = () => {
   const Sizable = {
     string: { unit: "znakov", verb: "imeti" },
     file: { unit: "bajtov", verb: "imeti" },
@@ -22675,11 +23333,11 @@ var error81 = () => {
 };
 function sl_default2() {
   return {
-    localeError: error81()
+    localeError: error82()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/sv.js
-var error82 = () => {
+var error83 = () => {
   const Sizable = {
     string: { unit: "tecken", verb: "att ha" },
     file: { unit: "bytes", verb: "att ha" },
@@ -22793,11 +23451,11 @@ var error82 = () => {
 };
 function sv_default2() {
   return {
-    localeError: error82()
+    localeError: error83()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ta.js
-var error83 = () => {
+var error84 = () => {
   const Sizable = {
     string: { unit: "\u0B8E\u0BB4\u0BC1\u0BA4\u0BCD\u0BA4\u0BC1\u0B95\u0BCD\u0B95\u0BB3\u0BCD", verb: "\u0B95\u0BCA\u0BA3\u0BCD\u0B9F\u0BBF\u0BB0\u0BC1\u0B95\u0BCD\u0B95 \u0BB5\u0BC7\u0BA3\u0BCD\u0B9F\u0BC1\u0BAE\u0BCD" },
     file: { unit: "\u0BAA\u0BC8\u0B9F\u0BCD\u0B9F\u0BC1\u0B95\u0BB3\u0BCD", verb: "\u0B95\u0BCA\u0BA3\u0BCD\u0B9F\u0BBF\u0BB0\u0BC1\u0B95\u0BCD\u0B95 \u0BB5\u0BC7\u0BA3\u0BCD\u0B9F\u0BC1\u0BAE\u0BCD" },
@@ -22910,11 +23568,11 @@ var error83 = () => {
 };
 function ta_default2() {
   return {
-    localeError: error83()
+    localeError: error84()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/th.js
-var error84 = () => {
+var error85 = () => {
   const Sizable = {
     string: { unit: "\u0E15\u0E31\u0E27\u0E2D\u0E31\u0E01\u0E29\u0E23", verb: "\u0E04\u0E27\u0E23\u0E21\u0E35" },
     file: { unit: "\u0E44\u0E1A\u0E15\u0E4C", verb: "\u0E04\u0E27\u0E23\u0E21\u0E35" },
@@ -23027,7 +23685,7 @@ var error84 = () => {
 };
 function th_default2() {
   return {
-    localeError: error84()
+    localeError: error85()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/tr.js
@@ -23051,7 +23709,7 @@ var parsedType7 = (data) => {
   }
   return t;
 };
-var error85 = () => {
+var error86 = () => {
   const Sizable = {
     string: { unit: "karakter", verb: "olmal\u0131" },
     file: { unit: "bayt", verb: "olmal\u0131" },
@@ -23142,11 +23800,11 @@ var error85 = () => {
 };
 function tr_default2() {
   return {
-    localeError: error85()
+    localeError: error86()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/uk.js
-var error86 = () => {
+var error87 = () => {
   const Sizable = {
     string: { unit: "\u0441\u0438\u043C\u0432\u043E\u043B\u0456\u0432", verb: "\u043C\u0430\u0442\u0438\u043C\u0435" },
     file: { unit: "\u0431\u0430\u0439\u0442\u0456\u0432", verb: "\u043C\u0430\u0442\u0438\u043C\u0435" },
@@ -23258,7 +23916,7 @@ var error86 = () => {
 };
 function uk_default2() {
   return {
-    localeError: error86()
+    localeError: error87()
   };
 }
 
@@ -23267,7 +23925,7 @@ function ua_default2() {
   return uk_default2();
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/ur.js
-var error87 = () => {
+var error88 = () => {
   const Sizable = {
     string: { unit: "\u062D\u0631\u0648\u0641", verb: "\u06C1\u0648\u0646\u0627" },
     file: { unit: "\u0628\u0627\u0626\u0679\u0633", verb: "\u06C1\u0648\u0646\u0627" },
@@ -23380,11 +24038,11 @@ var error87 = () => {
 };
 function ur_default2() {
   return {
-    localeError: error87()
+    localeError: error88()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/vi.js
-var error88 = () => {
+var error89 = () => {
   const Sizable = {
     string: { unit: "k\xFD t\u1EF1", verb: "c\xF3" },
     file: { unit: "byte", verb: "c\xF3" },
@@ -23496,11 +24154,11 @@ var error88 = () => {
 };
 function vi_default2() {
   return {
-    localeError: error88()
+    localeError: error89()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/zh-CN.js
-var error89 = () => {
+var error90 = () => {
   const Sizable = {
     string: { unit: "\u5B57\u7B26", verb: "\u5305\u542B" },
     file: { unit: "\u5B57\u8282", verb: "\u5305\u542B" },
@@ -23612,11 +24270,11 @@ var error89 = () => {
 };
 function zh_CN_default2() {
   return {
-    localeError: error89()
+    localeError: error90()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/zh-TW.js
-var error90 = () => {
+var error91 = () => {
   const Sizable = {
     string: { unit: "\u5B57\u5143", verb: "\u64C1\u6709" },
     file: { unit: "\u4F4D\u5143\u7D44", verb: "\u64C1\u6709" },
@@ -23729,11 +24387,11 @@ var error90 = () => {
 };
 function zh_TW_default2() {
   return {
-    localeError: error90()
+    localeError: error91()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/locales/yo.js
-var error91 = () => {
+var error92 = () => {
   const Sizable = {
     string: { unit: "\xE0mi", verb: "n\xED" },
     file: { unit: "bytes", verb: "n\xED" },
@@ -23844,7 +24502,7 @@ var error91 = () => {
 };
 function yo_default2() {
   return {
-    localeError: error91()
+    localeError: error92()
   };
 }
 // node_modules/@opencode-ai/plugin/node_modules/zod/v4/core/registries.js
@@ -26706,17 +27364,158 @@ tool.schema = exports_external2;
 
 // src/tools/domain-detector.ts
 var DOMAIN_PATTERNS = {
-  windows: [/\bwindows\b/i, /\bwin32\b/i, /\bregistry\b/i, /\bregedit\b/i, /\bwmi\b/i, /\bcim\b/i, /\bservice\b/i, /\bevent\s*log\b/i, /\bscheduled\s*task\b/i, /\bgpo\b/i, /\bgroup\s*policy\b/i, /\bmsi\b/i, /\binstaller\b/i, /\bwinrm\b/i],
-  powershell: [/\bpowershell\b/i, /\bpwsh\b/i, /\bps1\b/i, /\bcmdlet\b/i, /\bget-\w+/i, /\bset-\w+/i, /\bnew-\w+/i, /\bremove-\w+/i, /\binvoke-\w+/i, /\bpester\b/i],
-  python: [/\bpython\b/i, /\bpip\b/i, /\bpypi\b/i, /\bdjango\b/i, /\bflask\b/i, /\bpandas\b/i, /\bnumpy\b/i, /\bpytest\b/i, /\bvenv\b/i, /\bconda\b/i],
-  oracle: [/\boracle\b/i, /\bsqlplus\b/i, /\bplsql\b/i, /\btnsnames\b/i, /\bpdb\b/i, /\bcdb\b/i, /\btablespace\b/i, /\brman\b/i, /\bdataguard\b/i, /\basm\b/i, /\brac\b/i, /\bora-\d+/i],
-  network: [/\bnetwork\b/i, /\bfirewall\b/i, /\bdns\b/i, /\bdhcp\b/i, /\btcp\b/i, /\budp\b/i, /\bip\s*address\b/i, /\bsubnet\b/i, /\bvlan\b/i, /\brouting\b/i, /\bswitch\b/i, /\bload\s*balanc/i, /\bproxy\b/i, /\bssl\b/i, /\btls\b/i, /\bcertificate\b/i],
-  security: [/\bstig\b/i, /\bdisa\b/i, /\bcve\b/i, /\bvulnerabil/i, /\bharden\b/i, /\baudit\b/i, /\bcompliance\b/i, /\bscap\b/i, /\bfips\b/i, /\bcac\b/i, /\bpki\b/i, /\bencrypt/i],
-  linux: [/\blinux\b/i, /\bubuntu\b/i, /\brhel\b/i, /\bcentos\b/i, /\bbash\b/i, /\bsystemd\b/i, /\bsystemctl\b/i, /\byum\b/i, /\bapt\b/i, /\bcron\b/i, /\bchmod\b/i, /\bchown\b/i],
-  vmware: [/\bvmware\b/i, /\bvsphere\b/i, /\besxi\b/i, /\bvcenter\b/i, /\bvsan\b/i, /\bnsx\b/i, /\bvmotion\b/i, /\bdatastore\b/i, /\bpowercli\b/i, /\bova\b/i, /\bovf\b/i],
-  azure: [/\bazure\b/i, /\baz\s+\w+/i, /\bentra\b/i, /\baad\b/i, /\bazure\s*ad\b/i, /\barm\s*template\b/i, /\bbicep\b/i, /\bazure\s*devops\b/i, /\bblob\b/i, /\bkeyvault\b/i],
-  active_directory: [/\bactive\s*directory\b/i, /\bad\s+\w+/i, /\bldap\b/i, /\bdomain\s*controller\b/i, /\bgpupdate\b/i, /\bdsquery\b/i, /\bdsmod\b/i, /\baduc\b/i, /\bkerberos\b/i, /\bspn\b/i],
-  ui_ux: [/\bui\b/i, /\bux\b/i, /\buser\s+experience\b/i, /\buser\s+interface\b/i, /\bvisual\s+design\b/i, /\binteraction\s+design\b/i, /\bdesign\s+system\b/i, /\bwireframe\b/i, /\bprototype\b/i, /\baccessibility\b/i, /\btypography\b/i, /\blayout\b/i, /\bresponsive\b/i]
+  windows: [
+    /\bwindows\b/i,
+    /\bwin32\b/i,
+    /\bregistry\b/i,
+    /\bregedit\b/i,
+    /\bwmi\b/i,
+    /\bcim\b/i,
+    /\bservice\b/i,
+    /\bevent\s*log\b/i,
+    /\bscheduled\s*task\b/i,
+    /\bgpo\b/i,
+    /\bgroup\s*policy\b/i,
+    /\bmsi\b/i,
+    /\binstaller\b/i,
+    /\bwinrm\b/i
+  ],
+  powershell: [
+    /\bpowershell\b/i,
+    /\bpwsh\b/i,
+    /\bps1\b/i,
+    /\bcmdlet\b/i,
+    /\bget-\w+/i,
+    /\bset-\w+/i,
+    /\bnew-\w+/i,
+    /\bremove-\w+/i,
+    /\binvoke-\w+/i,
+    /\bpester\b/i
+  ],
+  python: [
+    /\bpython\b/i,
+    /\bpip\b/i,
+    /\bpypi\b/i,
+    /\bdjango\b/i,
+    /\bflask\b/i,
+    /\bpandas\b/i,
+    /\bnumpy\b/i,
+    /\bpytest\b/i,
+    /\bvenv\b/i,
+    /\bconda\b/i
+  ],
+  oracle: [
+    /\boracle\b/i,
+    /\bsqlplus\b/i,
+    /\bplsql\b/i,
+    /\btnsnames\b/i,
+    /\bpdb\b/i,
+    /\bcdb\b/i,
+    /\btablespace\b/i,
+    /\brman\b/i,
+    /\bdataguard\b/i,
+    /\basm\b/i,
+    /\brac\b/i,
+    /\bora-\d+/i
+  ],
+  network: [
+    /\bnetwork\b/i,
+    /\bfirewall\b/i,
+    /\bdns\b/i,
+    /\bdhcp\b/i,
+    /\btcp\b/i,
+    /\budp\b/i,
+    /\bip\s*address\b/i,
+    /\bsubnet\b/i,
+    /\bvlan\b/i,
+    /\brouting\b/i,
+    /\bswitch\b/i,
+    /\bload\s*balanc/i,
+    /\bproxy\b/i,
+    /\bssl\b/i,
+    /\btls\b/i,
+    /\bcertificate\b/i
+  ],
+  security: [
+    /\bstig\b/i,
+    /\bdisa\b/i,
+    /\bcve\b/i,
+    /\bvulnerabil/i,
+    /\bharden\b/i,
+    /\baudit\b/i,
+    /\bcompliance\b/i,
+    /\bscap\b/i,
+    /\bfips\b/i,
+    /\bcac\b/i,
+    /\bpki\b/i,
+    /\bencrypt/i
+  ],
+  linux: [
+    /\blinux\b/i,
+    /\bubuntu\b/i,
+    /\brhel\b/i,
+    /\bcentos\b/i,
+    /\bbash\b/i,
+    /\bsystemd\b/i,
+    /\bsystemctl\b/i,
+    /\byum\b/i,
+    /\bapt\b/i,
+    /\bcron\b/i,
+    /\bchmod\b/i,
+    /\bchown\b/i
+  ],
+  vmware: [
+    /\bvmware\b/i,
+    /\bvsphere\b/i,
+    /\besxi\b/i,
+    /\bvcenter\b/i,
+    /\bvsan\b/i,
+    /\bnsx\b/i,
+    /\bvmotion\b/i,
+    /\bdatastore\b/i,
+    /\bpowercli\b/i,
+    /\bova\b/i,
+    /\bovf\b/i
+  ],
+  azure: [
+    /\bazure\b/i,
+    /\baz\s+\w+/i,
+    /\bentra\b/i,
+    /\baad\b/i,
+    /\bazure\s*ad\b/i,
+    /\barm\s*template\b/i,
+    /\bbicep\b/i,
+    /\bazure\s*devops\b/i,
+    /\bblob\b/i,
+    /\bkeyvault\b/i
+  ],
+  active_directory: [
+    /\bactive\s*directory\b/i,
+    /\bad\s+\w+/i,
+    /\bldap\b/i,
+    /\bdomain\s*controller\b/i,
+    /\bgpupdate\b/i,
+    /\bdsquery\b/i,
+    /\bdsmod\b/i,
+    /\baduc\b/i,
+    /\bkerberos\b/i,
+    /\bspn\b/i
+  ],
+  ui_ux: [
+    /\bui\b/i,
+    /\bux\b/i,
+    /\buser\s+experience\b/i,
+    /\buser\s+interface\b/i,
+    /\bvisual\s+design\b/i,
+    /\binteraction\s+design\b/i,
+    /\bdesign\s+system\b/i,
+    /\bwireframe\b/i,
+    /\bprototype\b/i,
+    /\baccessibility\b/i,
+    /\btypography\b/i,
+    /\blayout\b/i,
+    /\bresponsive\b/i
+  ]
 };
 var detect_domains = tool({
   description: "Detect which SME domains are relevant for a given text. " + "Returns a list of domain names (windows, powershell, python, oracle, " + "network, security, linux, vmware, azure, active_directory, ui_ux) " + "that match patterns in the input text.",
@@ -26833,8 +27632,8 @@ var extract_code_blocks = tool({
       try {
         fs2.writeFileSync(filepath, code.trim(), "utf-8");
         savedFiles.push(filepath);
-      } catch (error92) {
-        errors5.push(`Failed to save ${filename}: ${error92 instanceof Error ? error92.message : String(error92)}`);
+      } catch (error93) {
+        errors5.push(`Failed to save ${filename}: ${error93 instanceof Error ? error93.message : String(error93)}`);
       }
     }
     let result = `Extracted ${savedFiles.length} file(s):
@@ -26889,28 +27688,32 @@ var gitingest = tool({
     return fetchGitingest(args);
   }
 });
-// src/utils/logger.ts
-var DEBUG = process.env.OPENCODE_SWARM_DEBUG === "1";
-function log(message, data) {
-  if (!DEBUG)
-    return;
-  const timestamp = new Date().toISOString();
-  if (data !== undefined) {
-    console.log(`[opencode-swarm ${timestamp}] ${message}`, data);
-  } else {
-    console.log(`[opencode-swarm ${timestamp}] ${message}`);
-  }
-}
 // src/index.ts
 var OpenCodeSwarm = async (ctx) => {
   const config3 = loadPluginConfig(ctx.directory);
   const agents = getAgentConfigs(config3);
+  const agentDefinitions = createAgents(config3);
   const pipelineHook = createPipelineTrackerHook(config3);
+  const systemEnhancerHook = createSystemEnhancerHook(config3, ctx.directory);
+  const compactionHook = createCompactionCustomizerHook(config3, ctx.directory);
+  const contextBudgetHandler = createContextBudgetHandler(config3);
+  const commandHandler = createSwarmCommandHandler(ctx.directory, Object.fromEntries(agentDefinitions.map((agent) => [agent.name, agent])));
+  const activityHooks = createAgentActivityHooks(config3, ctx.directory);
+  const delegationHandler = createDelegationTrackerHook(config3);
   log("Plugin initialized", {
     directory: ctx.directory,
     maxIterations: config3.max_iterations,
     agentCount: Object.keys(agents).length,
-    agentNames: Object.keys(agents)
+    agentNames: Object.keys(agents),
+    hooks: {
+      pipeline: !!pipelineHook["experimental.chat.messages.transform"],
+      systemEnhancer: !!systemEnhancerHook["experimental.chat.system.transform"],
+      compaction: !!compactionHook["experimental.session.compacting"],
+      contextBudget: !!contextBudgetHandler,
+      commands: true,
+      agentActivity: config3.hooks?.agent_activity !== false,
+      delegationTracker: config3.hooks?.delegation_tracker === true
+    }
   });
   return {
     name: "opencode-swarm",
@@ -26926,11 +27729,28 @@ var OpenCodeSwarm = async (ctx) => {
       } else {
         Object.assign(opencodeConfig.agent, agents);
       }
+      opencodeConfig.command = {
+        ...opencodeConfig.command || {},
+        swarm: {
+          template: "{{arguments}}",
+          description: "Swarm management commands"
+        }
+      };
       log("Config applied", {
-        agents: Object.keys(agents)
+        agents: Object.keys(agents),
+        commands: ["swarm"]
       });
     },
-    "experimental.chat.messages.transform": pipelineHook["experimental.chat.messages.transform"]
+    "experimental.chat.messages.transform": composeHandlers(...[
+      pipelineHook["experimental.chat.messages.transform"],
+      contextBudgetHandler
+    ].filter((fn) => Boolean(fn))),
+    "experimental.chat.system.transform": systemEnhancerHook["experimental.chat.system.transform"],
+    "experimental.session.compacting": compactionHook["experimental.session.compacting"],
+    "command.execute.before": safeHook(commandHandler),
+    "tool.execute.before": safeHook(activityHooks.toolBefore),
+    "tool.execute.after": safeHook(activityHooks.toolAfter),
+    "chat.message": safeHook(delegationHandler)
   };
 };
 var src_default = OpenCodeSwarm;

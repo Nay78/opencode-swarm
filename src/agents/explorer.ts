@@ -35,11 +35,10 @@ DOMAINS: [relevant SME domains: powershell, security, python, etc.]
 REVIEW NEEDED:
 - [path]: [why, which SME]`;
 
-
 export function createExplorerAgent(
 	model: string,
 	customPrompt?: string,
-	customAppendPrompt?: string
+	customAppendPrompt?: string,
 ): AgentDefinition {
 	let prompt = EXPLORER_PROMPT;
 

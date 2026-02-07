@@ -22,7 +22,17 @@ Swarm: paid
 - **Tools tested via .execute()**: ToolDefinition wrappers (detect_domains, extract_code_blocks, gitingest) tested by calling their .execute() method directly.
 - **File-extractor tests use temp dirs**: extract_code_blocks writes files — tests create temp directories and clean up after.
 - **Agent factory tests rely on no-custom-prompts**: loadAgentPrompt returns empty objects when no custom prompt files exist, which is the default test environment.
-- **v4.3.0 deferred**: Context Pruning + Hooks Pipeline Enhancement + Agent Message Passing + Slash Commands planned for future release after test suite is established.
+
+### v4.3.0 Decisions
+- **Hook composition via composeHandlers**: Plugin API allows ONE handler per hook type. Multiple handlers composed via `composeHandlers<I,O>(...fns)` which runs handlers sequentially on shared output, each wrapped in safeHook.
+- **safeHook is the safety net**: No registration rollback needed. Hooks mutate output in place; safeHook catches errors and leaves output unchanged. Log error stack at warning level.
+- **Renamed "Agent Message Passing" → "Agent Awareness"**: No message queues or routing. Just activity tracking + cross-agent context injection via system prompts. Architect remains sole orchestrator.
+- **Slash commands via config hook**: OpenCode Config type has `command?: { [key: string]: { template, description } }`. No separate `command.register` API exists. Use `config` hook to add `swarm` command, `command.execute.before` to handle it.
+- **Context pruning leverages OpenCode compaction**: Use `experimental.session.compacting` hook to guide OpenCode's built-in session compaction. Inject plan.md phase + context.md decisions as compaction context.
+- **Token estimation**: Conservative 0.33 chars-per-token ratio. Context limits configurable per-model via `context_budget.model_limits`.
+- **Grouped config**: New flags under `hooks: {}` and `context_budget: {}` objects, not flat booleans.
+- **All hook file I/O is async**: Use Bun.file().text() via readSwarmFileAsync, never sync fs calls.
+- **Cross-agent context injection configurable**: `hooks.agent_awareness_max_chars` (default: 300).
 
 ## Architecture (Post-Enhancement)
 Agents per swarm: 7 subagents + 1 architect = 8 total
@@ -33,6 +43,24 @@ Agents per swarm: 7 subagents + 1 architect = 8 total
 - reviewer (subagent, read-only, correctness + security)
 - critic (subagent, read-only, plan review gate)
 - test_engineer (subagent, write tests + run them, structured PASS/FAIL verdicts)
+
+## OpenCode Plugin API Hooks (v1.1.19)
+```typescript
+interface Hooks {
+  event?, config?, tool?, auth?,
+  "chat.message"?          // New message (sessionID, agent, model, parts)
+  "chat.params"?           // Modify LLM params (temperature, topP, topK)
+  "chat.headers"?          // Modify request headers
+  "permission.ask"?        // Permission gate
+  "command.execute.before"? // Intercept slash commands
+  "tool.execute.before"?   // Before tool use
+  "tool.execute.after"?    // After tool use
+  "experimental.chat.messages.transform"?  // Transform message array (USED: pipeline-tracker + context-budget)
+  "experimental.chat.system.transform"?    // Transform system prompt (USED: system-enhancer)
+  "experimental.session.compacting"?       // Customize compaction (USED: compaction-customizer)
+  "experimental.text.complete"?            // Text completion
+}
+```
 
 ## Delegation Formats
 
@@ -69,6 +97,7 @@ OUTPUT: VERDICT + RISK + ISSUES
 - Config cascade: user (~/.config/opencode/) → project (.opencode/) with deep merge
 - Custom prompts: `{agent}.md` replaces, `{agent}_append.md` appends
 - Read-only agents: `tools: { write: false, edit: false, patch: false }`
+- Hook pattern: `safeHook(handler)` wraps all hooks; `composeHandlers()` for same-type composition
 
 ## File Map
 - Entry: `src/index.ts`
@@ -76,9 +105,30 @@ OUTPUT: VERDICT + RISK + ISSUES
 - Agent defs: `src/agents/{name}.ts`
 - Config: `src/config/schema.ts`, `constants.ts`, `loader.ts`
 - Tools: `src/tools/domain-detector.ts`, `file-extractor.ts`, `gitingest.ts`
-- Hooks: `src/hooks/pipeline-tracker.ts`
+- Hooks: `src/hooks/pipeline-tracker.ts`, `src/hooks/index.ts`
+- Hooks (v4.3.0): `src/hooks/utils.ts`, `system-enhancer.ts`, `compaction-customizer.ts`, `context-budget.ts`, `agent-activity.ts`, `delegation-tracker.ts`
+- Commands (v4.3.0): `src/commands/index.ts`, `status.ts`, `plan.ts`, `agents.ts`
 - Docs: `README.md`, `CHANGELOG.md`, `docs/architecture.md`, `docs/design-rationale.md`, `docs/installation.md`
-- Tests: `tests/unit/{config,tools,agents,hooks}/` (v4.2.0)
+- Tests: `tests/unit/{config,tools,agents,hooks,commands}/`
 
 ## SME Cache
-(No SME consultations needed for v4.2.0 — test suite is a well-understood domain)
+
+### Plugin Architecture (v4.3.0)
+- Fix inject_phase_reminders: use `!== false` instead of `=== true`
+- safeHook pattern: try/catch wrapper, log warning, return original payload on error
+- composeHandlers: run handlers sequentially on shared mutable output, each individually wrapped in safeHook
+- All hooks stateless — mutable state belongs in service singletons or .swarm/ files
+- Don't mutate incoming payload directly; for message transforms, modify the output object properties
+- Guard experimental API usage with feature detection where possible
+- Hook failures must never crash the plugin
+
+### LLM Context Management (v4.3.0)
+- Can't delete messages from history, only transform/inject via hooks
+- Main pruning lever: `experimental.session.compacting` hook — guide OpenCode's built-in compaction
+- Token estimate: chars * 0.33 (conservative, sufficient for budget warnings)
+- Phase-boundary summarization: at phase transitions, offload detail to .swarm/context.md
+- Preserve verbatim: task requirements, file paths, key decisions, error messages
+- Safe to summarize: intermediate discussion, exploration results, verbose tool output
+- System prompt injection keeps agents focused post-compaction
+- Budget warnings at 70% and 90% thresholds (configurable)
+- Different agents need different context: coder needs code, reviewer needs code + requirements, architect needs everything

@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.2.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.3.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   <img src="https://img.shields.io/badge/opencode-plugin-purple" alt="OpenCode Plugin">
   <img src="https://img.shields.io/badge/agents-8-orange" alt="Agents">
-  <img src="https://img.shields.io/badge/tests-209-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-447-brightgreen" alt="Tests">
 </p>
 
 <h1 align="center">🐝 OpenCode Swarm</h1>
@@ -324,6 +324,31 @@ bunx opencode-swarm install
 
 ---
 
+## What's New in v4.3.0
+
+### 🔧 Hooks Pipeline
+- **`safeHook()`** — Crash-safe wrapper for all hooks. Errors are caught and logged, never crash the plugin.
+- **`composeHandlers()`** — Compose multiple handlers for the same hook type (Plugin API allows only one handler per type).
+
+### 📊 Context Pruning
+- **Token budget tracking** — Estimates context window usage and injects warnings at 70% and 90% thresholds.
+- **Enhanced session compaction** — Guides OpenCode's built-in compaction with plan.md phases and context.md decisions.
+- **System prompt enhancement** — Injects current phase, task, and key decisions to keep agents focused post-compaction.
+
+### ⚡ Slash Commands
+- **`/swarm status`** — Current phase, progress, and agent count.
+- **`/swarm plan [N]`** — View full plan or a specific phase.
+- **`/swarm agents`** — List all registered agents with models and permissions.
+
+### 🤖 Agent Awareness
+- **Activity tracking** — Tool usage tracked per agent via `tool.execute.before/after` hooks. Activity summary flushed to context.md every 20 events.
+- **Delegation tracking** — Active agent per session tracked via `chat.message` hook. Optional delegation chain logging.
+- **Cross-agent context** — System enhancer injects relevant context from other agents' activity into system prompts.
+
+All features are opt-in via configuration. See [Installation Guide](docs/installation.md) for config options.
+
+---
+
 ## Agents
 
 ### 🎯 Orchestrator
@@ -423,7 +448,7 @@ bun test
 bun test tests/unit/config/schema.test.ts
 ```
 
-209 unit tests across 9 files covering config, tools, agents, and hooks. Uses Bun's built-in test runner — zero additional test dependencies.
+447 unit tests across 21 files covering config, tools, agents, hooks, commands, and state. Uses Bun's built-in test runner — zero additional test dependencies.
 
 ---
 

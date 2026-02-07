@@ -21,11 +21,10 @@ OUTPUT FORMAT:
 DONE: [one-line summary]
 CHANGED: [file]: [what changed]`;
 
-
 export function createCoderAgent(
 	model: string,
 	customPrompt?: string,
-	customAppendPrompt?: string
+	customAppendPrompt?: string,
 ): AgentDefinition {
 	let prompt = CODER_PROMPT;
 

@@ -5,7 +5,7 @@ import * as path from 'node:path';
 
 const CONFIG_DIR = path.join(
 	process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'),
-	'opencode'
+	'opencode',
 );
 
 const OPENCODE_CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
@@ -29,8 +29,9 @@ function loadJson<T>(filepath: string): T | null {
 		const content = fs.readFileSync(filepath, 'utf-8');
 		// Strip comments for JSONC support
 		const stripped = content
-			.replace(/\\"|"(?:\\"|[^"])*"|(\/\/.*|\/\*[\s\S]*?\*\/)/g, (match, comment) =>
-				comment ? '' : match
+			.replace(
+				/\\"|"(?:\\"|[^"])*"|(\/\/.*|\/\*[\s\S]*?\*\/)/g,
+				(match, comment) => (comment ? '' : match),
 			)
 			.replace(/,(\s*[}\]])/g, '$1');
 		return JSON.parse(stripped) as T;
@@ -62,22 +63,22 @@ async function install(): Promise<number> {
 	}
 
 	const pluginName = 'opencode-swarm';
-	
+
 	// Remove any existing entries for this plugin
 	opencodeConfig.plugin = opencodeConfig.plugin.filter(
-		(p) => p !== pluginName && !p.startsWith(`${pluginName}@`)
+		(p) => p !== pluginName && !p.startsWith(`${pluginName}@`),
 	);
-	
+
 	// Add fresh entry
 	opencodeConfig.plugin.push(pluginName);
-	
+
 	// Disable OpenCode's default agents to avoid conflicts
 	if (!opencodeConfig.agent) {
 		opencodeConfig.agent = {};
 	}
 	opencodeConfig.agent.explore = { disable: true };
 	opencodeConfig.agent.general = { disable: true };
-	
+
 	saveJson(OPENCODE_CONFIG_PATH, opencodeConfig);
 	console.log('✓ Added opencode-swarm to OpenCode plugins');
 	console.log('✓ Disabled default OpenCode agents (explore, general)');
@@ -124,7 +125,9 @@ async function install(): Promise<number> {
 	console.log('3. The Architect agent will orchestrate your requests');
 
 	console.log('\n📖 SME agent:');
-	console.log('   The SME agent supports any domain — the Architect determines');
+	console.log(
+		'   The SME agent supports any domain — the Architect determines',
+	);
 	console.log('   what expertise is needed and requests it dynamically.');
 
 	return 0;

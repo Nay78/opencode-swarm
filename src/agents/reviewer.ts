@@ -28,11 +28,10 @@ RISK LEVELS:
 - HIGH: must fix
 - CRITICAL: blocks approval`;
 
-
 export function createReviewerAgent(
 	model: string,
 	customPrompt?: string,
-	customAppendPrompt?: string
+	customAppendPrompt?: string,
 ): AgentDefinition {
 	let prompt = REVIEWER_PROMPT;
 
