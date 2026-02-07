@@ -1,8 +1,11 @@
 import type { AgentDefinition } from '../agents';
 export { handleAgentsCommand } from './agents';
 export { handleConfigCommand } from './config';
+export { handleDiagnoseCommand } from './diagnose';
+export { handleExportCommand } from './export';
 export { handleHistoryCommand } from './history';
 export { handlePlanCommand } from './plan';
+export { handleResetCommand } from './reset';
 export { handleStatusCommand } from './status';
 /**
  * Creates a command.execute.before handler for /swarm commands.

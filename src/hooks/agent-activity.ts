@@ -213,7 +213,7 @@ function replaceOrAppendSection(
 
 	if (headingIndex === -1) {
 		// Append at end with double newline separator
-		return content.trimEnd() + '\n\n' + newSection + '\n';
+		return `${content.trimEnd()}\n\n${newSection}\n`;
 	}
 
 	// Find the next ## heading after this one (or end of content)
@@ -223,16 +223,11 @@ function replaceOrAppendSection(
 	if (nextHeadingMatch && nextHeadingMatch.index !== undefined) {
 		// Replace from heading to next heading
 		const endIndex = headingIndex + heading.length + nextHeadingMatch.index;
-		return (
-			content.substring(0, headingIndex) +
-			newSection +
-			'\n' +
-			content.substring(endIndex + 1)
-		);
+		return `${content.substring(0, headingIndex)}${newSection}\n${content.substring(endIndex + 1)}`;
 	}
 
 	// Replace from heading to end of file
-	return content.substring(0, headingIndex) + newSection + '\n';
+	return `${content.substring(0, headingIndex)}${newSection}\n`;
 }
 
 // Export for testing purposes

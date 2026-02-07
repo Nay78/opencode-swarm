@@ -16,6 +16,23 @@ import { createTestEngineerAgent } from './test-engineer';
 export type { AgentDefinition } from './architect';
 
 /**
+ * Strip the swarm prefix from an agent name to get the base name.
+ * e.g., "local_coder" with prefix "local" → "coder"
+ * Returns the name unchanged if no prefix matches.
+ */
+export function stripSwarmPrefix(
+	agentName: string,
+	swarmPrefix?: string,
+): string {
+	if (!swarmPrefix || !agentName) return agentName;
+	const prefixWithUnderscore = `${swarmPrefix}_`;
+	if (agentName.startsWith(prefixWithUnderscore)) {
+		return agentName.substring(prefixWithUnderscore.length);
+	}
+	return agentName;
+}
+
+/**
  * Get the model for an agent within a specific swarm config
  */
 function getModelForAgent(
@@ -28,10 +45,7 @@ function getModelForAgent(
 ): string {
 	// Strip swarm prefix if present (e.g., "local_coder" -> "coder")
 	// Only strip if we have a known swarm prefix, not just any underscore
-	let baseAgentName = agentName;
-	if (swarmPrefix && agentName.startsWith(`${swarmPrefix}_`)) {
-		baseAgentName = agentName.substring(swarmPrefix.length + 1);
-	}
+	const baseAgentName = stripSwarmPrefix(agentName, swarmPrefix);
 
 	// 1. Check explicit override
 	const explicit = swarmAgents?.[baseAgentName]?.model;
@@ -49,10 +63,7 @@ function isAgentDisabled(
 	swarmAgents?: Record<string, { disabled?: boolean }>,
 	swarmPrefix?: string,
 ): boolean {
-	let baseAgentName = agentName;
-	if (swarmPrefix && agentName.startsWith(`${swarmPrefix}_`)) {
-		baseAgentName = agentName.substring(swarmPrefix.length + 1);
-	}
+	const baseAgentName = stripSwarmPrefix(agentName, swarmPrefix);
 	return swarmAgents?.[baseAgentName]?.disabled === true;
 }
 
@@ -64,10 +75,7 @@ function getTemperatureOverride(
 	swarmAgents?: Record<string, { temperature?: number }>,
 	swarmPrefix?: string,
 ): number | undefined {
-	let baseAgentName = agentName;
-	if (swarmPrefix && agentName.startsWith(`${swarmPrefix}_`)) {
-		baseAgentName = agentName.substring(swarmPrefix.length + 1);
-	}
+	const baseAgentName = stripSwarmPrefix(agentName, swarmPrefix);
 	return swarmAgents?.[baseAgentName]?.temperature;
 }
 

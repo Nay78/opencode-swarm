@@ -14246,28 +14246,28 @@ ${customAppendPrompt}`;
 }
 
 // src/agents/index.ts
-function getModelForAgent(agentName, swarmAgents, swarmPrefix) {
-  let baseAgentName = agentName;
-  if (swarmPrefix && agentName.startsWith(`${swarmPrefix}_`)) {
-    baseAgentName = agentName.substring(swarmPrefix.length + 1);
+function stripSwarmPrefix(agentName, swarmPrefix) {
+  if (!swarmPrefix || !agentName)
+    return agentName;
+  const prefixWithUnderscore = `${swarmPrefix}_`;
+  if (agentName.startsWith(prefixWithUnderscore)) {
+    return agentName.substring(prefixWithUnderscore.length);
   }
+  return agentName;
+}
+function getModelForAgent(agentName, swarmAgents, swarmPrefix) {
+  const baseAgentName = stripSwarmPrefix(agentName, swarmPrefix);
   const explicit = swarmAgents?.[baseAgentName]?.model;
   if (explicit)
     return explicit;
   return DEFAULT_MODELS[baseAgentName] ?? DEFAULT_MODELS.default;
 }
 function isAgentDisabled(agentName, swarmAgents, swarmPrefix) {
-  let baseAgentName = agentName;
-  if (swarmPrefix && agentName.startsWith(`${swarmPrefix}_`)) {
-    baseAgentName = agentName.substring(swarmPrefix.length + 1);
-  }
+  const baseAgentName = stripSwarmPrefix(agentName, swarmPrefix);
   return swarmAgents?.[baseAgentName]?.disabled === true;
 }
 function getTemperatureOverride(agentName, swarmAgents, swarmPrefix) {
-  let baseAgentName = agentName;
-  if (swarmPrefix && agentName.startsWith(`${swarmPrefix}_`)) {
-    baseAgentName = agentName.substring(swarmPrefix.length + 1);
-  }
+  const baseAgentName = stripSwarmPrefix(agentName, swarmPrefix);
   return swarmAgents?.[baseAgentName]?.temperature;
 }
 function applyOverrides(agent, swarmAgents, swarmPrefix) {
@@ -14534,6 +14534,92 @@ function estimateTokens(text) {
   return Math.ceil(text.length * 0.33);
 }
 
+// src/commands/diagnose.ts
+async function handleDiagnoseCommand(directory, _args) {
+  const checks3 = [];
+  const planContent = await readSwarmFileAsync(directory, "plan.md");
+  const contextContent = await readSwarmFileAsync(directory, "context.md");
+  if (planContent) {
+    const hasPhases = /^## Phase \d+/m.test(planContent);
+    const hasTasks = /^- \[[ x]\]/m.test(planContent);
+    if (hasPhases && hasTasks) {
+      checks3.push({
+        name: "plan.md",
+        status: "\u2705",
+        detail: "Found with valid phase structure"
+      });
+    } else {
+      checks3.push({
+        name: "plan.md",
+        status: "\u274C",
+        detail: "Found but missing phase/task structure"
+      });
+    }
+  } else {
+    checks3.push({ name: "plan.md", status: "\u274C", detail: "Not found" });
+  }
+  if (contextContent) {
+    checks3.push({ name: "context.md", status: "\u2705", detail: "Found" });
+  } else {
+    checks3.push({ name: "context.md", status: "\u274C", detail: "Not found" });
+  }
+  try {
+    const config2 = loadPluginConfig(directory);
+    if (config2) {
+      checks3.push({
+        name: "Plugin config",
+        status: "\u2705",
+        detail: "Valid configuration loaded"
+      });
+    } else {
+      checks3.push({
+        name: "Plugin config",
+        status: "\u2705",
+        detail: "Using defaults (no custom config)"
+      });
+    }
+  } catch {
+    checks3.push({
+      name: "Plugin config",
+      status: "\u274C",
+      detail: "Invalid configuration"
+    });
+  }
+  const passCount = checks3.filter((c) => c.status === "\u2705").length;
+  const totalCount = checks3.length;
+  const allPassed = passCount === totalCount;
+  const lines = [
+    "## Swarm Health Check",
+    "",
+    ...checks3.map((c) => `- ${c.status} **${c.name}**: ${c.detail}`),
+    "",
+    `**Result**: ${allPassed ? "\u2705 All checks passed" : `\u26A0\uFE0F ${passCount}/${totalCount} checks passed`}`
+  ];
+  return lines.join(`
+`);
+}
+
+// src/commands/export.ts
+async function handleExportCommand(directory, _args) {
+  const planContent = await readSwarmFileAsync(directory, "plan.md");
+  const contextContent = await readSwarmFileAsync(directory, "context.md");
+  const exportData = {
+    version: "4.5.0",
+    exported: new Date().toISOString(),
+    plan: planContent,
+    context: contextContent
+  };
+  const lines = [
+    "## Swarm Export",
+    "",
+    "```json",
+    JSON.stringify(exportData, null, 2),
+    "```"
+  ];
+  return lines.join(`
+`);
+}
+
 // src/commands/history.ts
 async function handleHistoryCommand(directory, _args) {
   const planContent = await readSwarmFileAsync(directory, "plan.md");
@@ -14626,6 +14712,47 @@ async function handlePlanCommand(directory, args) {
   }
   return phaseLines.join(`
 `).trim();
+}
+
+// src/commands/reset.ts
+import * as fs2 from "fs";
+async function handleResetCommand(directory, args) {
+  const hasConfirm = args.includes("--confirm");
+  if (!hasConfirm) {
+    return [
+      "## Swarm Reset",
+      "",
+      "\u26A0\uFE0F This will delete plan.md and context.md from .swarm/",
+      "",
+      "**Tip**: Run `/swarm export` first to backup your state.",
+      "",
+      "To confirm, run: `/swarm reset --confirm`"
+    ].join(`
+`);
+  }
+  const filesToReset = ["plan.md", "context.md"];
+  const results = [];
+  for (const filename of filesToReset) {
+    try {
+      const resolvedPath = validateSwarmPath(directory, filename);
+      if (fs2.existsSync(resolvedPath)) {
+        fs2.unlinkSync(resolvedPath);
+        results.push(`- \u2705 Deleted ${filename}`);
+      } else {
+        results.push(`- \u23ED\uFE0F ${filename} not found (skipped)`);
+      }
+    } catch {
+      results.push(`- \u274C Failed to delete ${filename}`);
+    }
+  }
+  return [
+    "## Swarm Reset Complete",
+    "",
+    ...results,
+    "",
+    "Swarm state has been cleared. Start fresh with a new plan."
+  ].join(`
+`);
 }
 
 // src/hooks/extractors.ts
@@ -14804,7 +14931,10 @@ var HELP_TEXT = [
   "- `/swarm plan [phase]` \u2014 Show plan (optionally filter by phase number)",
   "- `/swarm agents` \u2014 List registered agents",
   "- `/swarm history` \u2014 Show completed phases summary",
-  "- `/swarm config` \u2014 Show current resolved configuration"
+  "- `/swarm config` \u2014 Show current resolved configuration",
+  "- `/swarm diagnose` \u2014 Run health check on swarm state",
+  "- `/swarm export` \u2014 Export plan and context as JSON",
+  "- `/swarm reset --confirm` \u2014 Clear swarm state files"
 ].join(`
 `);
 function createSwarmCommandHandler(directory, agents) {
@@ -14830,6 +14960,15 @@ function createSwarmCommandHandler(directory, agents) {
         break;
       case "config":
         text = await handleConfigCommand(directory, args);
+        break;
+      case "diagnose":
+        text = await handleDiagnoseCommand(directory, args);
+        break;
+      case "export":
+        text = await handleExportCommand(directory, args);
+        break;
+      case "reset":
+        text = await handleResetCommand(directory, args);
         break;
       default:
         text = HELP_TEXT;
@@ -14945,19 +15084,19 @@ function renderActivitySection() {
 function replaceOrAppendSection(content, heading, newSection) {
   const headingIndex = content.indexOf(heading);
   if (headingIndex === -1) {
-    return content.trimEnd() + `
+    return `${content.trimEnd()}
 
-` + newSection + `
+${newSection}
 `;
   }
   const afterHeading = content.substring(headingIndex + heading.length);
   const nextHeadingMatch = afterHeading.match(/\n## /);
   if (nextHeadingMatch && nextHeadingMatch.index !== undefined) {
     const endIndex = headingIndex + heading.length + nextHeadingMatch.index;
-    return content.substring(0, headingIndex) + newSection + `
-` + content.substring(endIndex + 1);
+    return `${content.substring(0, headingIndex)}${newSection}
+${content.substring(endIndex + 1)}`;
   }
-  return content.substring(0, headingIndex) + newSection + `
+  return `${content.substring(0, headingIndex)}${newSection}
 `;
 }
 // src/hooks/compaction-customizer.ts
@@ -15205,7 +15344,7 @@ ${activitySection}`;
       break;
   }
   if (contextSummary.length > maxChars) {
-    return contextSummary.substring(0, maxChars - 3) + "...";
+    return `${contextSummary.substring(0, maxChars - 3)}...`;
   }
   return contextSummary;
 }
@@ -27710,7 +27849,7 @@ Use these as DOMAIN values when delegating to @sme.`;
   }
 });
 // src/tools/file-extractor.ts
-import * as fs2 from "fs";
+import * as fs3 from "fs";
 import * as path4 from "path";
 var EXT_MAP = {
   python: ".py",
@@ -27773,8 +27912,8 @@ var extract_code_blocks = tool({
   execute: async (args) => {
     const { content, output_dir, prefix } = args;
     const targetDir = output_dir || process.cwd();
-    if (!fs2.existsSync(targetDir)) {
-      fs2.mkdirSync(targetDir, { recursive: true });
+    if (!fs3.existsSync(targetDir)) {
+      fs3.mkdirSync(targetDir, { recursive: true });
     }
     const pattern = /```(\w*)\n([\s\S]*?)```/g;
     const matches = [...content.matchAll(pattern)];
@@ -27793,12 +27932,12 @@ var extract_code_blocks = tool({
       const base = path4.basename(filepath, path4.extname(filepath));
       const ext = path4.extname(filepath);
       let counter = 1;
-      while (fs2.existsSync(filepath)) {
+      while (fs3.existsSync(filepath)) {
         filepath = path4.join(targetDir, `${base}_${counter}${ext}`);
         counter++;
       }
       try {
-        fs2.writeFileSync(filepath, code.trim(), "utf-8");
+        fs3.writeFileSync(filepath, code.trim(), "utf-8");
         savedFiles.push(filepath);
       } catch (error93) {
         errors5.push(`Failed to save ${filename}: ${error93 instanceof Error ? error93.message : String(error93)}`);

@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.3.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.5.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   <img src="https://img.shields.io/badge/opencode-plugin-purple" alt="OpenCode Plugin">
   <img src="https://img.shields.io/badge/agents-8-orange" alt="Agents">
-  <img src="https://img.shields.io/badge/tests-483-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-622-brightgreen" alt="Tests">
 </p>
 
 <h1 align="center">🐝 OpenCode Swarm</h1>
@@ -313,37 +313,47 @@ Each architect automatically delegates to its own swarm's agents.
 ## Installation
 
 ```bash
-# Add to opencode.json
-{
-  "plugin": ["opencode-swarm"]
-}
-
-# Or install via CLI
+# Install via CLI (recommended)
 bunx opencode-swarm install
+```
+
+### Uninstall
+
+```bash
+# Remove from opencode.json
+bunx opencode-swarm uninstall
+
+# Remove from opencode.json + clean up config files
+bunx opencode-swarm uninstall --clean
 ```
 
 ---
 
-## What's New in v4.3.0
+## What's New
 
-### 🔧 Hooks Pipeline
-- **`safeHook()`** — Crash-safe wrapper for all hooks. Errors are caught and logged, never crash the plugin.
-- **`composeHandlers()`** — Compose multiple handlers for the same hook type (Plugin API allows only one handler per type).
+### v4.5.0 — Tech Debt + New Commands
+- **Lint cleanup** — Replaced string concatenation with template literals, documented `as any` casts with biome-ignore comments.
+- **Code deduplication** — Extracted `stripSwarmPrefix()` utility to eliminate 3 duplicate prefix-stripping blocks.
+- **`/swarm diagnose`** — Health check for `.swarm/` files, plan structure, and plugin configuration.
+- **`/swarm export`** — Export plan.md and context.md as portable JSON.
+- **`/swarm reset --confirm`** — Clear swarm state files with safety confirmation.
 
-### 📊 Context Pruning
-- **Token budget tracking** — Estimates context window usage and injects warnings at 70% and 90% thresholds.
-- **Enhanced session compaction** — Guides OpenCode's built-in compaction with plan.md phases and context.md decisions.
-- **System prompt enhancement** — Injects current phase, task, and key decisions to keep agents focused post-compaction.
+### v4.4.0 — DX & Quality
+- **CLI `uninstall` command** — Remove plugin with optional `--clean` flag.
+- **Custom error classes** — `SwarmError` hierarchy with actionable `guidance` messages.
+- **`/swarm history`** — View completed phases from plan.md.
+- **`/swarm config`** — View current resolved plugin configuration.
 
-### ⚡ Slash Commands
-- **`/swarm status`** — Current phase, progress, and agent count.
-- **`/swarm plan [N]`** — View full plan or a specific phase.
-- **`/swarm agents`** — List all registered agents with models and permissions.
+### v4.3.2 — Security Hardening
+- **Path validation** — `validateSwarmPath()` prevents directory traversal in `.swarm/` file operations.
+- **Fetch hardening** — 10s timeout, 5MB limit, retry logic for gitingest tool.
+- **Config limits** — Deep merge depth limit (10), config file size limit (100KB).
 
-### 🤖 Agent Awareness
-- **Activity tracking** — Tool usage tracked per agent via `tool.execute.before/after` hooks. Activity summary flushed to context.md every 20 events.
-- **Delegation tracking** — Active agent per session tracked via `chat.message` hook. Optional delegation chain logging.
-- **Cross-agent context** — System enhancer injects relevant context from other agents' activity into system prompts.
+### v4.3.0 — Hooks & Agent Awareness
+- **Hooks pipeline** — `safeHook()` crash-safe wrapper, `composeHandlers()` for multi-handler composition.
+- **Context pruning** — Token budget tracking with 70%/90% threshold warnings.
+- **Slash commands** — `/swarm status`, `/swarm plan`, `/swarm agents`.
+- **Agent awareness** — Activity tracking, delegation tracking, cross-agent context injection.
 
 All features are opt-in via configuration. See [Installation Guide](docs/installation.md) for config options.
 
@@ -377,6 +387,21 @@ All features are opt-in via configuration. See [Installation Guide](docs/install
 |-------|------|
 | `reviewer` | Combined correctness + security review. The architect specifies CHECK dimensions (security, correctness, edge-cases, performance, etc.) per call. |
 | `critic` | Plan review gate. Reviews the architect's plan BEFORE implementation — checks completeness, feasibility, scope, dependencies, and flags AI-slop. |
+
+---
+
+## Slash Commands
+
+| Command | Description |
+|---------|-------------|
+| `/swarm status` | Current phase, task progress, and agent count |
+| `/swarm plan [N]` | View full plan or filter by phase number |
+| `/swarm agents` | List all registered agents with models and permissions |
+| `/swarm history` | View completed phases with status icons |
+| `/swarm config` | View current resolved plugin configuration |
+| `/swarm diagnose` | Health check for .swarm/ files and config |
+| `/swarm export` | Export plan and context as portable JSON |
+| `/swarm reset --confirm` | Clear swarm state files (with safety gate) |
 
 ---
 
@@ -448,7 +473,22 @@ bun test
 bun test tests/unit/config/schema.test.ts
 ```
 
-447 unit tests across 21 files covering config, tools, agents, hooks, commands, and state. Uses Bun's built-in test runner — zero additional test dependencies.
+622 unit tests across 29 files covering config, tools, agents, hooks, commands, and state. Uses Bun's built-in test runner — zero additional test dependencies.
+
+## Troubleshooting
+
+### Plugin not loading
+1. Verify `opencode-swarm` is listed in your `opencode.json` plugins array
+2. Run `bunx opencode-swarm install` to auto-configure
+3. Run `/swarm diagnose` to check health status
+
+### Commands not working
+- Ensure you're using `/swarm <command>`, not `/swarm/<command>`
+- Run `/swarm` with no arguments to see available commands
+
+### Resuming a project
+- Swarm automatically detects `.swarm/plan.md` and resumes where you left off
+- If you get unexpected behavior, run `/swarm export` to backup, then `/swarm reset --confirm` to start fresh
 
 ---
 

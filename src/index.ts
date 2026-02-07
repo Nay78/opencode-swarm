@@ -100,26 +100,33 @@ const OpenCodeSwarm: Plugin = async (ctx) => {
 				pipelineHook['experimental.chat.messages.transform'],
 				contextBudgetHandler,
 			].filter((fn): fn is NonNullable<typeof fn> => Boolean(fn)),
+			// biome-ignore lint/suspicious/noExplicitAny: Plugin API requires generic hook wrappers
 		) as any,
 
 		// Inject system prompt enhancements
 		'experimental.chat.system.transform': systemEnhancerHook[
 			'experimental.chat.system.transform'
+			// biome-ignore lint/suspicious/noExplicitAny: Plugin API requires generic hook wrappers
 		] as any,
 
 		// Handle session compaction
 		'experimental.session.compacting': compactionHook[
 			'experimental.session.compacting'
+			// biome-ignore lint/suspicious/noExplicitAny: Plugin API requires generic hook wrappers
 		] as any,
 
 		// Handle /swarm commands
+		// biome-ignore lint/suspicious/noExplicitAny: Plugin API requires generic hook wrappers
 		'command.execute.before': safeHook(commandHandler) as any,
 
 		// Track tool usage
+		// biome-ignore lint/suspicious/noExplicitAny: Plugin API requires generic hook wrappers
 		'tool.execute.before': safeHook(activityHooks.toolBefore) as any,
+		// biome-ignore lint/suspicious/noExplicitAny: Plugin API requires generic hook wrappers
 		'tool.execute.after': safeHook(activityHooks.toolAfter) as any,
 
 		// Track agent delegations and active agent
+		// biome-ignore lint/suspicious/noExplicitAny: Plugin API requires generic hook wrappers
 		'chat.message': safeHook(delegationHandler) as any,
 	};
 };

@@ -68,6 +68,15 @@ describe('createSwarmCommandHandler', () => {
         expect((output.parts[0] as any).text).toContain('architect');
     });
 
+    test('dispatches "diagnose" to handleDiagnoseCommand', async () => {
+        const output = { parts: [] as unknown[] };
+        await handler({ command: 'swarm', sessionID: 's1', arguments: 'diagnose' }, output);
+        expect(output.parts).toHaveLength(1);
+        expect((output.parts[0] as any).type).toBe('text');
+        // Just verify that some diagnose-like content is returned
+        expect((output.parts[0] as any).text.length).toBeGreaterThan(0);
+    });
+
     test('sets output.parts with type text', async () => {
         const output = { parts: [] as unknown[] };
         await handler({ command: 'swarm', sessionID: 's1', arguments: 'status' }, output);

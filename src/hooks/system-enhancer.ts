@@ -133,7 +133,7 @@ function extractAgentContext(
 
 	// Truncate to max chars
 	if (contextSummary.length > maxChars) {
-		return contextSummary.substring(0, maxChars - 3) + '...';
+		return `${contextSummary.substring(0, maxChars - 3)}...`;
 	}
 
 	return contextSummary;

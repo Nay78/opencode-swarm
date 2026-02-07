@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.5.0] - 2026-02-07
+### Fixed
+- Replaced string concatenation with template literals in hooks (`agent-activity.ts`, `system-enhancer.ts`).
+- Documented 7 `as any` casts in `src/index.ts` with `biome-ignore` comments explaining the Plugin API type limitation.
+- Extracted `stripSwarmPrefix()` utility to eliminate 3 duplicate prefix-stripping blocks in `src/agents/index.ts`.
+
+### Added
+- **`/swarm diagnose`** — Health check for `.swarm/` files, plan structure validation, and plugin configuration.
+- **`/swarm export`** — Export plan.md and context.md as portable JSON with version and timestamp.
+- **`/swarm reset --confirm`** — Clear `.swarm/` state files with safety confirmation gate.
+- `stripSwarmPrefix()` utility function with input validation, exported for testing.
+
+### Changed
+- README.md updated with all v4.3.2–v4.5.0 features, 8 slash commands, CLI docs, and troubleshooting guide.
+- Version badge updated to 4.5.0, test count updated to 622.
+
+### Tests
+- New test suites: `stripSwarmPrefix` (8 tests), diagnose command (7 tests), export command (7 tests), reset command (7 tests).
+- **622 total tests** across 29 files (up from 592 in v4.4.0).
+
 ## [4.4.0] - 2026-02-07
 ### Changed
 - Updated `@opencode-ai/plugin` and `@opencode-ai/sdk` to 1.1.53.

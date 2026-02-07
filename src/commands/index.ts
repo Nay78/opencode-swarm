@@ -1,15 +1,21 @@
 import type { AgentDefinition } from '../agents';
 import { handleAgentsCommand } from './agents';
 import { handleConfigCommand } from './config';
+import { handleDiagnoseCommand } from './diagnose';
+import { handleExportCommand } from './export';
 import { handleHistoryCommand } from './history';
 import { handlePlanCommand } from './plan';
+import { handleResetCommand } from './reset';
 import { handleStatusCommand } from './status';
 
 // Re-export individual handlers
 export { handleAgentsCommand } from './agents';
 export { handleConfigCommand } from './config';
+export { handleDiagnoseCommand } from './diagnose';
+export { handleExportCommand } from './export';
 export { handleHistoryCommand } from './history';
 export { handlePlanCommand } from './plan';
+export { handleResetCommand } from './reset';
 export { handleStatusCommand } from './status';
 
 const HELP_TEXT = [
@@ -20,6 +26,9 @@ const HELP_TEXT = [
 	'- `/swarm agents` — List registered agents',
 	'- `/swarm history` — Show completed phases summary',
 	'- `/swarm config` — Show current resolved configuration',
+	'- `/swarm diagnose` — Run health check on swarm state',
+	'- `/swarm export` — Export plan and context as JSON',
+	'- `/swarm reset --confirm` — Clear swarm state files',
 ].join('\n');
 
 /**
@@ -60,6 +69,15 @@ export function createSwarmCommandHandler(
 				break;
 			case 'config':
 				text = await handleConfigCommand(directory, args);
+				break;
+			case 'diagnose':
+				text = await handleDiagnoseCommand(directory, args);
+				break;
+			case 'export':
+				text = await handleExportCommand(directory, args);
+				break;
+			case 'reset':
+				text = await handleResetCommand(directory, args);
 				break;
 			default:
 				text = HELP_TEXT;
