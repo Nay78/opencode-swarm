@@ -7,7 +7,7 @@
  */
 
 import * as path from 'node:path';
-import { warn } from '../utils';
+import { SwarmError, warn } from '../utils';
 
 export function safeHook<I, O>(
 	fn: (input: I, output: O) => Promise<void>,
@@ -17,7 +17,13 @@ export function safeHook<I, O>(
 			await fn(input, output);
 		} catch (_error) {
 			const functionName = fn.name || 'unknown';
-			warn(`Hook function '${functionName}' failed:`, _error);
+			if (_error instanceof SwarmError) {
+				warn(
+					`Hook '${functionName}' failed: ${_error.message}\n  → ${_error.guidance}`,
+				);
+			} else {
+				warn(`Hook function '${functionName}' failed:`, _error);
+			}
 		}
 	};
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { extractCurrentTask, extractIncompleteTasks, extractPatterns } from '../../../src/hooks/extractors';
+import { extractCurrentTask, extractIncompleteTasks, extractPatterns, extractCurrentPhase, extractDecisions } from '../../../src/hooks/extractors';
 
 describe('extractCurrentTask', () => {
 	it('Returns null for empty/falsy input', () => {
@@ -397,5 +397,206 @@ Just text, no bullets
 - Pattern 3: Write *comprehensive* tests **and** documentation`;
 		const result = extractPatterns(content);
 		expect(result).toBe('- **Pattern 1**: Always use `TypeScript` for new code\n- *Pattern 2*: Prefer **composition** over inheritance\n- Pattern 3: Write *comprehensive* tests **and** documentation');
+	});
+});
+
+describe('extractCurrentPhase', () => {
+	it('Returns null for empty/falsy input', () => {
+		expect(extractCurrentPhase('')).toBeNull();
+		expect(extractCurrentPhase(null as any)).toBeNull();
+		expect(extractCurrentPhase(undefined as any)).toBeNull();
+		expect(extractCurrentPhase('   ')).toBeNull();
+	});
+
+	it('Plan with IN PROGRESS phase → correct phase string', () => {
+		const content = `# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [ ] 1.1: Init project
+- [ ] 1.2: Add config
+
+## Phase 2: Development [PENDING]
+- [ ] 2.1: Implement features`;
+		const result = extractCurrentPhase(content);
+		expect(result).toBe('Phase 1: Setup [IN PROGRESS]');
+	});
+
+	it('Plan with only Phase: N header → "Phase N [PENDING]"', () => {
+		const content = `Phase: 2
+
+# Project Plan
+
+## Phase 1: Setup [COMPLETED]
+- [x] 1.1: Init project
+
+## Phase 2: Development [PENDING]
+- [ ] 2.1: Implement features`;
+		const result = extractCurrentPhase(content);
+		expect(result).toBe('Phase 2 [PENDING]');
+	});
+
+	it('Case-insensitive matching for [in progress]', () => {
+		const content = `# Project Plan
+
+## Phase 3: Testing [in progress]
+- [ ] 3.1: Write unit tests
+- [ ] 3.2: Write integration tests`;
+		const result = extractCurrentPhase(content);
+		expect(result).toBe('Phase 3: Testing [IN PROGRESS]');
+	});
+
+	it('IN PROGRESS phase beyond first 20 lines → null (out of scan range)', () => {
+		const content = `Phase: 1
+
+${'Line 1\n'.repeat(19)}## Phase 5: Deployment [IN PROGRESS]
+- [ ] 5.1: Setup production
+- [ ] 5.2: Deploy application`;
+		const result = extractCurrentPhase(content);
+		expect(result).toBe('Phase 1 [PENDING]');
+	});
+
+	it('Plan with both header and IN PROGRESS → IN PROGRESS takes priority', () => {
+		const content = `Phase: 3
+
+# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [ ] 1.1: Init project
+
+## Phase 2: Development [PENDING]
+- [ ] 2.1: Implement features`;
+		const result = extractCurrentPhase(content);
+		expect(result).toBe('Phase 1: Setup [IN PROGRESS]');
+	});
+
+	it('Multiple IN PROGRESS phases → returns the first one found', () => {
+		const content = `# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [ ] 1.1: Init project
+
+## Phase 2: Development [IN PROGRESS]
+- [ ] 2.1: Implement features`;
+		const result = extractCurrentPhase(content);
+		expect(result).toBe('Phase 1: Setup [IN PROGRESS]');
+	});
+
+	it('Phase heading with no description → "Phase N:  [IN PROGRESS]"', () => {
+		const content = `# Project Plan
+
+## Phase 7: [IN PROGRESS]
+- [ ] 7.1: Deploy application`;
+		const result = extractCurrentPhase(content);
+		expect(result).toBe('Phase 7:  [IN PROGRESS]');
+	});
+});
+
+describe('extractDecisions', () => {
+	it('Returns null for empty/falsy input', () => {
+		expect(extractDecisions('')).toBeNull();
+		expect(extractDecisions(null as any)).toBeNull();
+		expect(extractDecisions(undefined as any)).toBeNull();
+		expect(extractDecisions('   ')).toBeNull();
+	});
+
+	it('Content with ## Decisions section → extracts bullet points', () => {
+		const content = `# Context
+
+## Decisions
+- Use TypeScript for all new code
+- Follow existing coding standards
+- Write comprehensive tests
+
+## Other section
+- Not a decision`;
+		const result = extractDecisions(content);
+		expect(result).toBe('- Use TypeScript for all new code\n- Follow existing coding standards\n- Write comprehensive tests');
+	});
+
+	it('No ## Decisions section → null', () => {
+		const content = `# Context
+
+## Patterns
+- Pattern 1: Use TypeScript
+
+## Other section
+- Some content`;
+		const result = extractDecisions(content);
+		expect(result).toBeNull();
+	});
+
+	it('Empty Decisions section → null', () => {
+		const content = `# Context
+
+## Decisions
+
+## Other section
+- Some content`;
+		const result = extractDecisions(content);
+		expect(result).toBeNull();
+	});
+
+	it('Decisions section with no bullet points → null', () => {
+		const content = `# Context
+
+## Decisions
+Just text, no bullets here
+
+## Other section
+- Some content`;
+		const result = extractDecisions(content);
+		expect(result).toBeNull();
+	});
+
+	it('Respects maxChars truncation (append "...")', () => {
+		const longDecision = '- Decision: ' + 'A'.repeat(600);
+		const content = `# Context
+
+## Decisions
+- Basic decision
+${longDecision}
+- Another decision`;
+		const result = extractDecisions(content, 50);
+		expect(result).toContain('...');
+		expect(result?.length).toBeLessThanOrEqual(50 + 3);
+	});
+
+	it('Default maxChars is 500', () => {
+		const longDecision = '- Decision: ' + 'A'.repeat(600);
+		const content = `# Context
+
+## Decisions
+${longDecision}`;
+		const result = extractDecisions(content);
+		if (result) {
+			expect(result).toContain('...');
+			expect(result.length).toBeLessThanOrEqual(500 + 3);
+		}
+	});
+
+	it('Stops at next ## heading', () => {
+		const content = `# Context
+
+## Decisions
+- Decision 1: Use TypeScript
+- Decision 2: Write tests
+
+## Patterns
+- Pattern 1: Follow standards`;
+		const result = extractDecisions(content);
+		expect(result).toBe('- Decision 1: Use TypeScript\n- Decision 2: Write tests');
+	});
+
+	it('Only collects `- ` lines (ignores other text)', () => {
+		const content = `# Context
+
+## Decisions
+- Decision 1: Use TypeScript
+Some explanatory text here
+- Decision 2: Write tests
+More explanatory text
+- Decision 3: Document everything`;
+		const result = extractDecisions(content);
+		expect(result).toBe('- Decision 1: Use TypeScript\n- Decision 2: Write tests\n- Decision 3: Document everything');
 	});
 });

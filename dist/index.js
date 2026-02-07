@@ -14410,9 +14410,46 @@ function handleAgentsCommand(agents) {
 `);
 }
 
-// src/hooks/utils.ts
+// src/commands/config.ts
+import * as os2 from "os";
 import * as path2 from "path";
+function getUserConfigDir2() {
+  return process.env.XDG_CONFIG_HOME || path2.join(os2.homedir(), ".config");
+}
+async function handleConfigCommand(directory, _args) {
+  const config2 = loadPluginConfig(directory);
+  const userConfigPath = path2.join(getUserConfigDir2(), "opencode", "opencode-swarm.json");
+  const projectConfigPath = path2.join(directory, ".opencode", "opencode-swarm.json");
+  const lines = [
+    "## Swarm Configuration",
+    "",
+    "### Config Files",
+    `- User: \`${userConfigPath}\``,
+    `- Project: \`${projectConfigPath}\``,
+    "",
+    "### Resolved Config",
+    "```json",
+    JSON.stringify(config2, null, 2),
+    "```"
+  ];
+  return lines.join(`
+`);
+}
 
+// src/hooks/utils.ts
+import * as path3 from "path";
+
+// src/utils/errors.ts
+class SwarmError extends Error {
+  code;
+  guidance;
+  constructor(message, code, guidance) {
+    super(message);
+    this.name = "SwarmError";
+    this.code = code;
+    this.guidance = guidance;
+  }
+}
 // src/utils/logger.ts
 var DEBUG = process.env.OPENCODE_SWARM_DEBUG === "1";
 function log(message, data) {
@@ -14440,7 +14477,12 @@ function safeHook(fn) {
       await fn(input, output);
     } catch (_error) {
       const functionName = fn.name || "unknown";
-      warn(`Hook function '${functionName}' failed:`, _error);
+      if (_error instanceof SwarmError) {
+        warn(`Hook '${functionName}' failed: ${_error.message}
+  \u2192 ${_error.guidance}`);
+      } else {
+        warn(`Hook function '${functionName}' failed:`, _error);
+      }
     }
   };
 }
@@ -14462,14 +14504,14 @@ function validateSwarmPath(directory, filename) {
   if (/\.\.[/\\]/.test(filename)) {
     throw new Error("Invalid filename: path traversal detected");
   }
-  const baseDir = path2.normalize(path2.resolve(directory, ".swarm"));
-  const resolved = path2.normalize(path2.resolve(baseDir, filename));
+  const baseDir = path3.normalize(path3.resolve(directory, ".swarm"));
+  const resolved = path3.normalize(path3.resolve(baseDir, filename));
   if (process.platform === "win32") {
-    if (!resolved.toLowerCase().startsWith((baseDir + path2.sep).toLowerCase())) {
+    if (!resolved.toLowerCase().startsWith((baseDir + path3.sep).toLowerCase())) {
       throw new Error("Invalid filename: path escapes .swarm directory");
     }
   } else {
-    if (!resolved.startsWith(baseDir + path2.sep)) {
+    if (!resolved.startsWith(baseDir + path3.sep)) {
       throw new Error("Invalid filename: path escapes .swarm directory");
     }
   }
@@ -14490,6 +14532,57 @@ function estimateTokens(text) {
     return 0;
   }
   return Math.ceil(text.length * 0.33);
+}
+
+// src/commands/history.ts
+async function handleHistoryCommand(directory, _args) {
+  const planContent = await readSwarmFileAsync(directory, "plan.md");
+  if (!planContent) {
+    return "No history available.";
+  }
+  const phaseRegex = /^## Phase (\d+):?\s*(.+?)(?:\s*\[(COMPLETE|IN PROGRESS|PENDING)\])?\s*$/gm;
+  const phases = [];
+  const lines = planContent.split(`
+`);
+  for (let match = phaseRegex.exec(planContent);match !== null; match = phaseRegex.exec(planContent)) {
+    const num = parseInt(match[1], 10);
+    const name = match[2].trim();
+    const status = match[3] || "PENDING";
+    const headerLineIndex = lines.indexOf(match[0]);
+    let completed = 0;
+    let total = 0;
+    if (headerLineIndex !== -1) {
+      for (let i = headerLineIndex + 1;i < lines.length; i++) {
+        const line = lines[i];
+        if (/^## Phase \d+/.test(line) || line.trim() === "---" && total > 0) {
+          break;
+        }
+        if (/^- \[x\]/.test(line)) {
+          completed++;
+          total++;
+        } else if (/^- \[ \]/.test(line)) {
+          total++;
+        }
+      }
+    }
+    phases.push({ num, name, status, completed, total });
+  }
+  if (phases.length === 0) {
+    return "No history available.";
+  }
+  const tableLines = [
+    "## Swarm History",
+    "",
+    "| Phase | Name | Status | Tasks |",
+    "|-------|------|--------|-------|"
+  ];
+  for (const phase of phases) {
+    const statusIcon = phase.status === "COMPLETE" ? "\u2705" : phase.status === "IN PROGRESS" ? "\uD83D\uDD04" : "\u23F3";
+    const tasks = phase.total > 0 ? `${phase.completed}/${phase.total}` : "-";
+    tableLines.push(`| ${phase.num} | ${phase.name} | ${statusIcon} ${phase.status} | ${tasks} |`);
+  }
+  return tableLines.join(`
+`);
 }
 
 // src/commands/plan.ts
@@ -14709,7 +14802,9 @@ var HELP_TEXT = [
   "",
   "- `/swarm status` \u2014 Show current swarm state",
   "- `/swarm plan [phase]` \u2014 Show plan (optionally filter by phase number)",
-  "- `/swarm agents` \u2014 List registered agents"
+  "- `/swarm agents` \u2014 List registered agents",
+  "- `/swarm history` \u2014 Show completed phases summary",
+  "- `/swarm config` \u2014 Show current resolved configuration"
 ].join(`
 `);
 function createSwarmCommandHandler(directory, agents) {
@@ -14729,6 +14824,12 @@ function createSwarmCommandHandler(directory, agents) {
         break;
       case "agents":
         text = handleAgentsCommand(agents);
+        break;
+      case "history":
+        text = await handleHistoryCommand(directory, args);
+        break;
+      case "config":
+        text = await handleConfigCommand(directory, args);
         break;
       default:
         text = HELP_TEXT;
@@ -14817,8 +14918,8 @@ async function doFlush(directory) {
     const activitySection = renderActivitySection();
     const updated = replaceOrAppendSection(existing, "## Agent Activity", activitySection);
     const flushedCount = swarmState.pendingEvents;
-    const path3 = `${directory}/.swarm/context.md`;
-    await Bun.write(path3, updated);
+    const path4 = `${directory}/.swarm/context.md`;
+    await Bun.write(path4, updated);
     swarmState.pendingEvents = Math.max(0, swarmState.pendingEvents - flushedCount);
   } catch (error49) {
     warn("Agent activity flush failed:", error49);
@@ -15837,10 +15938,10 @@ function mergeDefs2(...defs) {
 function cloneDef2(schema) {
   return mergeDefs2(schema._zod.def);
 }
-function getElementAtPath2(obj, path3) {
-  if (!path3)
+function getElementAtPath2(obj, path4) {
+  if (!path4)
     return obj;
-  return path3.reduce((acc, key) => acc?.[key], obj);
+  return path4.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject2(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -16199,11 +16300,11 @@ function aborted2(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues2(path3, issues) {
+function prefixIssues2(path4, issues) {
   return issues.map((iss) => {
     var _a2;
     (_a2 = iss).path ?? (_a2.path = []);
-    iss.path.unshift(path3);
+    iss.path.unshift(path4);
     return iss;
   });
 }
@@ -16371,7 +16472,7 @@ function treeifyError2(error49, _mapper) {
     return issue3.message;
   };
   const result = { errors: [] };
-  const processError = (error50, path3 = []) => {
+  const processError = (error50, path4 = []) => {
     var _a2, _b;
     for (const issue3 of error50.issues) {
       if (issue3.code === "invalid_union" && issue3.errors.length) {
@@ -16381,7 +16482,7 @@ function treeifyError2(error49, _mapper) {
       } else if (issue3.code === "invalid_element") {
         processError({ issues: issue3.issues }, issue3.path);
       } else {
-        const fullpath = [...path3, ...issue3.path];
+        const fullpath = [...path4, ...issue3.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue3));
           continue;
@@ -16413,8 +16514,8 @@ function treeifyError2(error49, _mapper) {
 }
 function toDotPath2(_path) {
   const segs = [];
-  const path3 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path3) {
+  const path4 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path4) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -27610,7 +27711,7 @@ Use these as DOMAIN values when delegating to @sme.`;
 });
 // src/tools/file-extractor.ts
 import * as fs2 from "fs";
-import * as path3 from "path";
+import * as path4 from "path";
 var EXT_MAP = {
   python: ".py",
   py: ".py",
@@ -27688,12 +27789,12 @@ var extract_code_blocks = tool({
       if (prefix) {
         filename = `${prefix}_${filename}`;
       }
-      let filepath = path3.join(targetDir, filename);
-      const base = path3.basename(filepath, path3.extname(filepath));
-      const ext = path3.extname(filepath);
+      let filepath = path4.join(targetDir, filename);
+      const base = path4.basename(filepath, path4.extname(filepath));
+      const ext = path4.extname(filepath);
       let counter = 1;
       while (fs2.existsSync(filepath)) {
-        filepath = path3.join(targetDir, `${base}_${counter}${ext}`);
+        filepath = path4.join(targetDir, `${base}_${counter}${ext}`);
         counter++;
       }
       try {

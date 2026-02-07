@@ -1,6 +1,6 @@
 {
 	"name": "opencode-swarm",
-	"version": "4.3.2",
+	"version": "4.4.0",
 	"description": "Architect-centric agentic swarm plugin for OpenCode - hub-and-spoke orchestration with SME consultation, code generation, and QA review",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
@@ -35,12 +35,12 @@
 		"prepublishOnly": "bun run build"
 	},
 	"dependencies": {
-		"@opencode-ai/plugin": "^1.1.19",
-		"@opencode-ai/sdk": "^1.1.19",
+		"@opencode-ai/plugin": "^1.1.53",
+		"@opencode-ai/sdk": "^1.1.53",
 		"zod": "^4.1.8"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.3.11",
+		"@biomejs/biome": "2.3.14",
 		"bun-types": "latest",
 		"typescript": "^5.7.3"
 	}

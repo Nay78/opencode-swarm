@@ -137,16 +137,19 @@ OUTPUT: VERDICT + RISK + ISSUES
 
 | Tool | Calls | Success | Failed | Avg Duration |
 |------|-------|---------|--------|--------------|
-| read | 649 | 649 | 0 | 10ms |
-| bash | 440 | 440 | 0 | 1841ms |
-| edit | 319 | 319 | 0 | 1455ms |
-| glob | 126 | 126 | 0 | 51ms |
-| write | 108 | 108 | 0 | 1707ms |
+| read | 909 | 909 | 0 | 8ms |
+| bash | 636 | 636 | 0 | 1656ms |
+| edit | 472 | 472 | 0 | 1228ms |
+| glob | 138 | 138 | 0 | 48ms |
+| task | 137 | 137 | 0 | 103458ms |
+| write | 125 | 125 | 0 | 1824ms |
 | apply_patch | 104 | 104 | 0 | 1634ms |
-| task | 104 | 104 | 0 | 112343ms |
-| grep | 43 | 43 | 0 | 46ms |
-| todowrite | 29 | 29 | 0 | 6ms |
-| memory_set | 6 | 6 | 0 | 4ms |
-| memory_replace | 6 | 6 | 0 | 16ms |
-| memory_list | 5 | 5 | 0 | 1ms |
+| grep | 59 | 59 | 0 | 47ms |
+| todowrite | 53 | 53 | 0 | 5ms |
+| memory_set | 10 | 10 | 0 | 3ms |
+| memory_replace | 7 | 7 | 0 | 14ms |
+| memory_list | 6 | 6 | 0 | 2ms |
+| google_search | 4 | 4 | 0 | 179ms |
 | invalid | 3 | 3 | 0 | 2ms |
+| codesearch | 2 | 2 | 0 | 2850ms |
+| gitingest | 2 | 2 | 0 | 4092ms |

@@ -1,5 +1,7 @@
 import type { AgentDefinition } from '../agents';
 export { handleAgentsCommand } from './agents';
+export { handleConfigCommand } from './config';
+export { handleHistoryCommand } from './history';
 export { handlePlanCommand } from './plan';
 export { handleStatusCommand } from './status';
 /**

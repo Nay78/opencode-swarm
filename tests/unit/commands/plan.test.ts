@@ -104,4 +104,39 @@ describe('handlePlanCommand', () => {
         expect(result).toContain('## Phase 3');
         expect(result).toContain('Task 7');
     });
+
+    test('handles empty plan.md file', async () => {
+        await writePlan(tempDir, '');
+        const result = await handlePlanCommand(tempDir, []);
+        expect(result).toBe('No active swarm plan found.');
+    });
+
+    test('extracts Phase 0 boundary correctly', async () => {
+        const phaseZeroPlan = '## Phase 0: Init\n- [x] Initialize\n- [ ] Setup';
+        await writePlan(tempDir, phaseZeroPlan);
+        const result = await handlePlanCommand(tempDir, ['0']);
+        expect(result).toContain('## Phase 0');
+        expect(result).toContain('Initialize');
+    });
+
+    test('returns not found for negative phase number', async () => {
+        await writePlan(tempDir, SAMPLE_PLAN);
+        const result = await handlePlanCommand(tempDir, ['-1']);
+        expect(result).toBe('Phase -1 not found in plan.');
+    });
+
+    test('extracts phase with no tasks', async () => {
+        const emptyPhasePlan = '## Phase 1: Empty\n\n---\n\n## Phase 2: Has Tasks\n- [ ] A';
+        await writePlan(tempDir, emptyPhasePlan);
+        const result = await handlePlanCommand(tempDir, ['1']);
+        expect(result).toBe('## Phase 1: Empty');
+    });
+
+    test('handles float phase number by parsing integer part', async () => {
+        await writePlan(tempDir, SAMPLE_PLAN);
+        const result = await handlePlanCommand(tempDir, ['1.5']);
+        expect(result).toContain('## Phase 1');
+        expect(result).toContain('Task 2');
+        expect(result).not.toContain('Phase 2');
+    });
 });

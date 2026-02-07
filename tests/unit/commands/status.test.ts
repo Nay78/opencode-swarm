@@ -73,4 +73,29 @@ describe('handleStatusCommand', () => {
         expect(result).toContain('**Tasks**');
         expect(result).toContain('**Agents**');
     });
+
+    test('handles empty plan.md file', async () => {
+        await writePlan(tempDir, '');
+        const result = await handleStatusCommand(tempDir, mockAgents);
+        expect(result).toBe('No active swarm plan found.');
+    });
+
+    test('shows all tasks complete when only - [x] markers exist', async () => {
+        await writePlan(tempDir, '## Phase 1 [COMPLETE]\n- [x] Task 1\n- [x] Task 2\n- [x] Task 3');
+        const result = await handleStatusCommand(tempDir, mockAgents);
+        expect(result).toContain('3/3 complete');
+    });
+
+    test('shows 0/0 complete for plan without task markers', async () => {
+        await writePlan(tempDir, '## Phase 1: Planning\nJust some planning text without task markers');
+        const result = await handleStatusCommand(tempDir, mockAgents);
+        expect(result).toContain('0/0 complete');
+    });
+
+    test('shows 0 registered for empty agents record', async () => {
+        await writePlan(tempDir, '## Phase 1 [IN PROGRESS]\n- [ ] Task');
+        const emptyAgents: Record<string, AgentDefinition> = {};
+        const result = await handleStatusCommand(tempDir, emptyAgents);
+        expect(result).toContain('0 registered');
+    });
 });

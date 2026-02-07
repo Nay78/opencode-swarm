@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.4.0] - 2026-02-07
+### Changed
+- Updated `@opencode-ai/plugin` and `@opencode-ai/sdk` to 1.1.53.
+- Updated `@biomejs/biome` to 2.3.14.
+
+### Added
+- **CLI `uninstall` command** with `--clean` flag for removing the plugin from opencode.json and optionally cleaning up config files.
+- **Custom error classes** (`SwarmError`, `ConfigError`, `HookError`, `ToolError`, `CLIError`) with actionable `guidance` messages for better DX.
+- **`/swarm history` slash command** — view completed phases from plan.md with status icons and task counts.
+- **`/swarm config` slash command** — view current resolved plugin configuration and config file paths.
+- **Enhanced `safeHook` error logging** — SwarmError instances now include guidance text in warning output.
+
+### Tests
+- Expanded test coverage for hooks: extractors, system-enhancer, context-budget, agent-activity, delegation-tracker, compaction-customizer, pipeline-tracker (45 new edge case tests).
+- Expanded test coverage for commands: status, plan, agents, dispatcher (14 new edge case tests).
+- New test suites: CLI uninstall (9 tests), error classes (9 tests), history command (6 tests), config command (4 tests).
+- **592 total tests** (up from 506 in v4.3.2).
+
 ## [4.3.2] - 2026-02-07
 ### Security
 - **Path validation** — Added `validateSwarmPath()` to prevent directory traversal in `.swarm` file operations. Rejects null bytes, `..` traversal sequences, and paths escaping the `.swarm` directory. Windows-aware case-insensitive comparison.

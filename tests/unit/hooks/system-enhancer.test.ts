@@ -952,9 +952,176 @@ ${longActivity}
 				await transformHook(input, output);
 				
 				const agentContext = output.system.find((s: string) => s.startsWith('[SWARM AGENT CONTEXT]'));
-				expect(agentContext).toBeDefined();
-				expect(agentContext).toContain('Agent activity summary:'); // Should use default label
-			});
+			expect(agentContext).toBeDefined();
+			expect(agentContext).toContain('Agent activity summary:'); // Should use default label
 		});
+
+		it('strips "mega_" prefix correctly', async () => {
+			const swarmDir = join(tempDir, '.swarm');
+			await mkdir(swarmDir, { recursive: true });
+			await writeFile(join(swarmDir, 'plan.md'), '');
+			await writeFile(join(swarmDir, 'context.md'), `# Context
+
+## Agent Activity
+
+| Tool | Calls |
+|------|-------|
+| read | 5 |
+`);
+			
+			swarmState.activeAgent.set('test-session', 'mega_coder');
+			
+			const config: PluginConfig = {
+				...defaultConfig,
+				hooks: { system_enhancer: true, compaction: true, agent_activity: true, delegation_tracker: false, agent_awareness_max_chars: 300 },
+			};
+			const hook = createSystemEnhancerHook(config, tempDir);
+			const transformHook = hook['experimental.chat.system.transform'] as any;
+			
+			const input = { sessionID: 'test-session' };
+			const output = { system: [] as string[] };
+			await transformHook(input, output);
+			
+			const agentContext = output.system.find((s: string) => s.startsWith('[SWARM AGENT CONTEXT]'));
+			expect(agentContext).toBeDefined();
+			expect(agentContext).toContain('Recent tool activity for review context:');
+		});
+
+		it('strips "default_" prefix correctly', async () => {
+			const swarmDir = join(tempDir, '.swarm');
+			await mkdir(swarmDir, { recursive: true });
+			await writeFile(join(swarmDir, 'plan.md'), '');
+			await writeFile(join(swarmDir, 'context.md'), `# Context
+
+## Agent Activity
+
+| Tool | Calls |
+|------|-------|
+| read | 5 |
+`);
+			
+			swarmState.activeAgent.set('test-session', 'default_reviewer');
+			
+			const config: PluginConfig = {
+				...defaultConfig,
+				hooks: { system_enhancer: true, compaction: true, agent_activity: true, delegation_tracker: false, agent_awareness_max_chars: 300 },
+			};
+			const hook = createSystemEnhancerHook(config, tempDir);
+			const transformHook = hook['experimental.chat.system.transform'] as any;
+			
+			const input = { sessionID: 'test-session' };
+			const output = { system: [] as string[] };
+			await transformHook(input, output);
+			
+			const agentContext = output.system.find((s: string) => s.startsWith('[SWARM AGENT CONTEXT]'));
+			expect(agentContext).toBeDefined();
+			expect(agentContext).toContain('Tool usage to review:');
+		});
+
+		it('agent_awareness_max_chars defaults to 300 when not specified', async () => {
+			const swarmDir = join(tempDir, '.swarm');
+			await mkdir(swarmDir, { recursive: true });
+			await writeFile(join(swarmDir, 'plan.md'), '');
+			
+			// Create a short activity section (less than 300 chars)
+			const shortActivity = `# Context
+
+## Agent Activity
+
+| Tool | Calls |
+|------|-------|
+| read | 5 |
+| write | 3 |
+`;
+			await writeFile(join(swarmDir, 'context.md'), shortActivity);
+			
+			swarmState.activeAgent.set('test-session', 'paid_coder');
+			
+			const config: PluginConfig = {
+				...defaultConfig,
+				hooks: { system_enhancer: true, compaction: true, agent_activity: true, delegation_tracker: false },
+				// Note: NO agent_awareness_max_chars specified - should default to 300
+			};
+			const hook = createSystemEnhancerHook(config, tempDir);
+			const transformHook = hook['experimental.chat.system.transform'] as any;
+			
+			const input = { sessionID: 'test-session' };
+			const output = { system: [] as string[] };
+			await transformHook(input, output);
+			
+			const agentContext = output.system.find((s: string) => s.startsWith('[SWARM AGENT CONTEXT]'));
+			expect(agentContext).toBeDefined();
+			// Should NOT be truncated since it's shorter than 300 chars
+			expect(agentContext).not.toEndWith('...');
+		});
+
+		it('does NOT truncate when context is exactly at maxChars boundary', async () => {
+			const swarmDir = join(tempDir, '.swarm');
+			await mkdir(swarmDir, { recursive: true });
+			await writeFile(join(swarmDir, 'plan.md'), '');
+			
+			// Create context summary that will be exactly at the maxChars boundary
+			const baseSummary = 'Recent tool activity for review context:\n| Tool | Calls |\n|------|-------|\n| read | 5 |\n| write | 3 |';
+			const maxChars = baseSummary.length; // Set maxChars to exact length
+			
+			const config: PluginConfig = {
+				...defaultConfig,
+				hooks: { system_enhancer: true, compaction: true, agent_activity: true, delegation_tracker: false, agent_awareness_max_chars: maxChars },
+			};
+			
+			// Create activity section that will produce the exact summary we want
+			const activityContent = `# Context
+
+## Agent Activity
+
+| Tool | Calls |
+|------|-------|
+| read | 5 |
+| write | 3 |
+`;
+			await writeFile(join(swarmDir, 'context.md'), activityContent);
+			
+			swarmState.activeAgent.set('test-session', 'paid_coder');
+			
+			const hook = createSystemEnhancerHook(config, tempDir);
+			const transformHook = hook['experimental.chat.system.transform'] as any;
+			
+			const input = { sessionID: 'test-session' };
+			const output = { system: [] as string[] };
+			await transformHook(input, output);
+			
+			const agentContext = output.system.find((s: string) => s.startsWith('[SWARM AGENT CONTEXT]'));
+			expect(agentContext).toBeDefined();
+			// Should NOT be truncated since it's exactly at maxChars (not greater than)
+			expect(agentContext).not.toEndWith('...');
+			expect(agentContext!.length).toBe(maxChars + '[SWARM AGENT CONTEXT] '.length);
+		});
+
+		it('handles error when context.md read fails gracefully', async () => {
+			const swarmDir = join(tempDir, '.swarm');
+			await mkdir(swarmDir, { recursive: true });
+			await writeFile(join(swarmDir, 'plan.md'), '');
+			
+			// Create context.md as a directory instead of a file to cause read error
+			await mkdir(join(swarmDir, 'context.md'), { recursive: true });
+			
+			swarmState.activeAgent.set('test-session', 'paid_coder');
+			
+			const config: PluginConfig = {
+				...defaultConfig,
+				hooks: { system_enhancer: true, compaction: true, agent_activity: true, delegation_tracker: false, agent_awareness_max_chars: 300 },
+			};
+			const hook = createSystemEnhancerHook(config, tempDir);
+			const transformHook = hook['experimental.chat.system.transform'] as any;
+			
+			const input = { sessionID: 'test-session' };
+			const output = { system: ['Initial system prompt'] };
+			
+			// Should not crash and should leave output.system unchanged
+			await transformHook(input, output);
+			
+			expect(output.system).toEqual(['Initial system prompt']);
+		});
+	});
 	});
 });

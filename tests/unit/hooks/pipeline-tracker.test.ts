@@ -360,5 +360,133 @@ describe('Pipeline Tracker Hook', () => {
       await transform({}, output4);
       expect(output4.messages[0].parts[0].text).toBe('test');
     });
+
+    it('prepended text includes separator format', async () => {
+      const config = { 
+        inject_phase_reminders: true, 
+        max_iterations: 5, 
+        qa_retry_limit: 3 
+      };
+      const hook = createPipelineTrackerHook(config);
+      const transform = hook['experimental.chat.messages.transform'];
+      
+      const output = {
+        messages: [
+          {
+            info: { role: 'user', agent: 'architect' },
+            parts: [{ type: 'text', text: 'Original text here' }]
+          }
+        ]
+      };
+
+      await transform({}, output);
+
+      expect(output.messages[0].parts[0].text).toContain('\n\n---\n\n');
+      expect(output.messages[0].parts[0].text).toEndWith('Original text here');
+    });
+
+    it('text part with type "text" but text undefined is skipped', async () => {
+      const config = { 
+        inject_phase_reminders: true, 
+        max_iterations: 5, 
+        qa_retry_limit: 3 
+      };
+      const hook = createPipelineTrackerHook(config);
+      const transform = hook['experimental.chat.messages.transform'];
+      
+      const output = {
+        messages: [
+          {
+            info: { role: 'user', agent: 'architect' },
+            parts: [
+              { type: 'text' },
+              { type: 'text', text: 'Actual text' }
+            ]
+          }
+        ]
+      };
+
+      await transform({}, output);
+
+      expect(output.messages[0].parts[0]).toEqual({ type: 'text' });
+      expect(output.messages[0].parts[1].text).toContain('<swarm_reminder>');
+      expect(output.messages[0].parts[1].text).toContain('Actual text');
+    });
+
+    it('PHASE_REMINDER content includes key workflow steps', async () => {
+      const config = { 
+        inject_phase_reminders: true, 
+        max_iterations: 5, 
+        qa_retry_limit: 3 
+      };
+      const hook = createPipelineTrackerHook(config);
+      const transform = hook['experimental.chat.messages.transform'];
+      
+      const output = {
+        messages: [
+          {
+            info: { role: 'user', agent: 'architect' },
+            parts: [{ type: 'text', text: 'Test message' }]
+          }
+        ]
+      };
+
+      await transform({}, output);
+
+      const modifiedText = output.messages[0].parts[0].text;
+      expect(modifiedText).toContain('ARCHITECT WORKFLOW REMINDER');
+      expect(modifiedText).toContain('ANALYZE');
+      expect(modifiedText).toContain('SME_CONSULTATION');
+      expect(modifiedText).toContain('CODE');
+      expect(modifiedText).toContain('QA_REVIEW');
+      expect(modifiedText).toContain('DELEGATION RULES');
+    });
+
+    it('only last user message gets reminder even when mixed with non-user messages at end', async () => {
+      const config = { 
+        inject_phase_reminders: true, 
+        max_iterations: 5, 
+        qa_retry_limit: 3 
+      };
+      const hook = createPipelineTrackerHook(config);
+      const transform = hook['experimental.chat.messages.transform'];
+      
+      const output = {
+        messages: [
+          {
+            info: { role: 'user', agent: 'architect' },
+            parts: [{ type: 'text', text: 'First user message' }]
+          },
+          {
+            info: { role: 'assistant', agent: 'explorer' },
+            parts: [{ type: 'text', text: 'Assistant message 1' }]
+          },
+          {
+            info: { role: 'user', agent: 'architect' },
+            parts: [{ type: 'text', text: 'Last user message' }]
+          },
+          {
+            info: { role: 'assistant', agent: 'explorer' },
+            parts: [{ type: 'text', text: 'Last assistant message' }]
+          }
+        ]
+      };
+
+      await transform({}, output);
+
+      // First user message (index 0) should remain unchanged
+      expect(output.messages[0].parts[0].text).toBe('First user message');
+      expect(output.messages[0].parts[0].text).not.toContain('<swarm_reminder>');
+      
+      // Assistant messages should remain unchanged
+      expect(output.messages[1].parts[0].text).toBe('Assistant message 1');
+      expect(output.messages[1].parts[0].text).not.toContain('<swarm_reminder>');
+      expect(output.messages[3].parts[0].text).toBe('Last assistant message');
+      expect(output.messages[3].parts[0].text).not.toContain('<swarm_reminder>');
+      
+      // Last user message (index 2) should be modified
+      expect(output.messages[2].parts[0].text).toContain('<swarm_reminder>');
+      expect(output.messages[2].parts[0].text).toContain('Last user message');
+    });
   });
 });

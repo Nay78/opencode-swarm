@@ -292,5 +292,63 @@ describe('DelegationTrackerHook', () => {
 
 			expect(swarmState.pendingEvents).toBe(2); // Only 2 actual delegations
 		});
+
+		it('delegation chain initialization creates new array on first switch', async () => {
+			const hook = createDelegationTrackerHook(enabledConfig);
+			const sessionId = 'sess';
+
+			// Set initial agent
+			swarmState.activeAgent.set(sessionId, 'architect');
+
+			// First delegation should create a new array
+			await hook({ sessionID: sessionId, agent: 'coder' }, {});
+			const firstChain = swarmState.delegationChains.get(sessionId);
+			expect(firstChain).toHaveLength(1);
+
+			// Second delegation should reuse the same array (not create a new one)
+			const originalArray = firstChain;
+			await hook({ sessionID: sessionId, agent: 'reviewer' }, {});
+			const secondChain = swarmState.delegationChains.get(sessionId);
+
+			// Verify it's the same array object (reference equality)
+			expect(secondChain).toBe(originalArray);
+			expect(secondChain).toHaveLength(2);
+		});
+
+		it('timestamps are monotonically increasing', async () => {
+			const hook = createDelegationTrackerHook(enabledConfig);
+			const sessionId = 'test-session';
+
+			// Set initial agent
+			swarmState.activeAgent.set(sessionId, 'architect');
+
+			// Make rapid calls to ensure timestamps might be close together
+			await hook({ sessionID: sessionId, agent: 'coder' }, {});
+			await hook({ sessionID: sessionId, agent: 'reviewer' }, {});
+			await hook({ sessionID: sessionId, agent: 'sme' }, {});
+
+			const chain = swarmState.delegationChains.get(sessionId);
+			expect(chain).toHaveLength(3);
+
+			// Verify timestamps are monotonically increasing
+			expect(chain![0].timestamp).toBeLessThanOrEqual(chain![1].timestamp);
+			expect(chain![1].timestamp).toBeLessThanOrEqual(chain![2].timestamp);
+		});
+
+		it('handles undefined agent field explicitly', async () => {
+			const hook = createDelegationTrackerHook(enabledConfig);
+			const sessionId = 'test-session';
+
+			// Set a previous agent
+			swarmState.activeAgent.set(sessionId, 'architect');
+
+			// Call hook with explicitly undefined agent
+			await hook({ sessionID: sessionId, agent: undefined }, {});
+
+			// Should remain unchanged since undefined is falsy
+			expect(swarmState.activeAgent.get(sessionId)).toBe('architect');
+			expect(swarmState.delegationChains.has(sessionId)).toBe(false);
+			expect(swarmState.pendingEvents).toBe(0);
+		});
 	});
 });

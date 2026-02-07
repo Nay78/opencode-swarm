@@ -340,4 +340,69 @@ describe('handleAgentsCommand', () => {
 - **reviewer** | model: \`gpt-4\` | temp: 0.1 | 🔒 read-only
   Agent-level description`);
     });
+
+    test('shows "temp: 0" for agent with temperature of 0', () => {
+        const agentWithZeroTemp: Record<string, AgentDefinition> = {
+            precise: {
+                name: 'precise',
+                description: 'The precise agent',
+                config: {
+                    model: 'gpt-4',
+                    temperature: 0
+                }
+            }
+        };
+        
+        const result = handleAgentsCommand(agentWithZeroTemp);
+        
+        expect(result).toBe(`## Registered Agents
+
+- **precise** | model: \`gpt-4\` | temp: 0 | ✏️ read-write
+  The precise agent`);
+    });
+
+    test('shows read-only for agent with both write and edit set to false', () => {
+        const bothFalseAgent: Record<string, AgentDefinition> = {
+            restricted: {
+                name: 'restricted',
+                description: 'Restricted agent',
+                config: {
+                    model: 'gpt-4',
+                    temperature: 0.1,
+                    tools: {
+                        write: false,
+                        edit: false
+                    }
+                }
+            }
+        };
+        
+        const result = handleAgentsCommand(bothFalseAgent);
+        
+        expect(result).toBe(`## Registered Agents
+
+- **restricted** | model: \`gpt-4\` | temp: 0.1 | 🔒 read-only
+  Restricted agent`);
+    });
+
+    test('shows read-write for agent with empty tools object', () => {
+        const emptyToolsAgent: Record<string, AgentDefinition> = {
+            flexible: {
+                name: 'flexible',
+                description: 'Flexible agent',
+                config: {
+                    model: 'gpt-4',
+                    temperature: 0.2,
+                    tools: {}
+                }
+            }
+        };
+        
+        const result = handleAgentsCommand(emptyToolsAgent);
+        
+        expect(result).toBe(`## Registered Agents
+
+- **flexible** | model: \`gpt-4\` | temp: 0.2 | ✏️ read-write
+  Flexible agent`);
+    });
 });

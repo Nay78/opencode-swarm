@@ -501,5 +501,167 @@ Some other content.`;
 			expect(tableLines[1]).toContain('tool-a');
 			expect(tableLines[2]).toContain('tool-c');
 		});
+
+		it('should replace Agent Activity section when it is the last section', async () => {
+			// Set up initial activity
+			swarmState.toolAggregates.set('old-tool', {
+				tool: 'old-tool',
+				count: 1,
+				successCount: 1,
+				failureCount: 0,
+				totalDuration: 100,
+			});
+
+			const originalContent = `# Context
+
+## Decisions
+- Some decision
+
+## Agent Activity
+| Tool | Calls | Success | Failed | Avg Duration |
+|------|-------|---------|--------|--------------|
+| old-tool | 1 | 1 | 0 | 100ms |`;
+
+			await writeFile(join(tempDir, '.swarm', 'context.md'), originalContent);
+
+			// Update activity with new tool
+			swarmState.toolAggregates.clear();
+			swarmState.toolAggregates.set('new-tool', {
+				tool: 'new-tool',
+				count: 2,
+				successCount: 1,
+				failureCount: 1,
+				totalDuration: 800,
+			});
+
+			await _flushForTesting(tempDir);
+
+			// Verify content was replaced and content before Agent Activity is preserved
+			const content = await Bun.file(join(tempDir, '.swarm', 'context.md')).text();
+			expect(content).toContain('# Context');
+			expect(content).toContain('## Decisions');
+			expect(content).toContain('- Some decision');
+			expect(content).toContain('## Agent Activity');
+			expect(content).toContain('| new-tool | 2 | 1 | 1 | 400ms |');
+			expect(content).not.toContain('old-tool');
+		});
+
+		it('should append Agent Activity section when heading not found in non-empty content', async () => {
+			swarmState.toolAggregates.set('test-tool', {
+				tool: 'test-tool',
+				count: 3,
+				successCount: 2,
+				failureCount: 1,
+				totalDuration: 1500,
+			});
+
+			const originalContent = `# Context
+
+## Decisions
+- Some decision
+
+## Patterns
+- Some pattern`;
+
+			await writeFile(join(tempDir, '.swarm', 'context.md'), originalContent);
+
+			await _flushForTesting(tempDir);
+
+			// Verify Agent Activity is appended with double-newline separator
+			const content = await Bun.file(join(tempDir, '.swarm', 'context.md')).text();
+			expect(content).toContain('# Context');
+			expect(content).toContain('## Decisions');
+			expect(content).toContain('- Some decision');
+			expect(content).toContain('## Patterns');
+			expect(content).toContain('- Some pattern');
+			expect(content).toContain('## Agent Activity');
+			expect(content).toContain('| test-tool | 3 | 2 | 1 | 500ms |');
+			
+			// Verify the section is appended at the end
+			const lines = content.split('\n');
+			const agentActivityIndex = lines.findIndex(line => line.includes('## Agent Activity'));
+			const patternsIndex = lines.findIndex(line => line.includes('## Patterns'));
+			expect(agentActivityIndex).toBeGreaterThan(patternsIndex);
+		});
+
+		it('should create context.md when file does not exist', async () => {
+			swarmState.toolAggregates.set('test-tool', {
+				tool: 'test-tool',
+				count: 2,
+				successCount: 1,
+				failureCount: 1,
+				totalDuration: 800,
+			});
+			swarmState.pendingEvents = 3;
+
+			// Note: .swarm directory already exists from beforeEach
+			// context.md file should NOT exist initially
+
+			await _flushForTesting(tempDir);
+
+			// Verify context.md was created with Agent Activity section
+			const content = await Bun.file(join(tempDir, '.swarm', 'context.md')).text();
+			expect(content).toContain('## Agent Activity');
+			expect(content).toContain('| test-tool | 2 | 1 | 1 | 400ms |');
+			expect(swarmState.pendingEvents).toBe(0);
+		});
+
+		it('should auto-trigger flush at 20 pending events', async () => {
+			const hooks = createAgentActivityHooks(defaultConfig, tempDir);
+			
+			// Create empty context.md file so write succeeds
+			await writeFile(join(tempDir, '.swarm', 'context.md'), '# Test');
+			
+			// Execute 20 rapid toolBefore + toolAfter calls to reach pendingEvents >= 20
+			for (let i = 0; i < 20; i++) {
+				const callID = `auto-flush-test-${i}`;
+				await hooks.toolBefore({
+					tool: 'auto-test-tool',
+					sessionID: 'auto-session',
+					callID,
+				}, { args: {} });
+				
+				await hooks.toolAfter({
+					tool: 'auto-test-tool',
+					sessionID: 'auto-session',
+					callID,
+				}, {
+					title: 'Auto Test',
+					output: `result-${i}`,
+					metadata: {}
+				});
+			}
+
+			// Wait a short time for the auto-flush to trigger and complete
+			await new Promise(resolve => setTimeout(resolve, 50));
+
+			// Verify context.md file exists and contains the Agent Activity table
+			const content = await Bun.file(join(tempDir, '.swarm', 'context.md')).text();
+			expect(content).toContain('## Agent Activity');
+			expect(content).toContain('| auto-test-tool | 20 | 20 | 0 |');
+			
+			// Verify pendingEvents was reset after auto-flush
+			expect(swarmState.pendingEvents).toBe(0);
+		});
+
+		it('should show "0ms" for average duration when count is zero', async () => {
+			// Manually set a toolAggregate with count: 0
+			swarmState.toolAggregates.set('zero-tool', {
+				tool: 'zero-tool',
+				count: 0,
+				successCount: 0,
+				failureCount: 0,
+				totalDuration: 0,
+			});
+			swarmState.pendingEvents = 1;
+
+			await writeFile(join(tempDir, '.swarm', 'context.md'), '# Test');
+
+			await _flushForTesting(tempDir);
+
+			// Verify the rendered table line shows "0ms" for avg duration
+			const content = await Bun.file(join(tempDir, '.swarm', 'context.md')).text();
+			expect(content).toContain('| zero-tool | 0 | 0 | 0 | 0ms |');
+		});
 	});
 });

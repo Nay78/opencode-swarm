@@ -96,6 +96,66 @@ Next steps:`);
   console.log("   what expertise is needed and requests it dynamically.");
   return 0;
 }
+async function uninstall() {
+  try {
+    console.log(`\uD83D\uDC1D Uninstalling OpenCode Swarm...
+`);
+    const opencodeConfig = loadJson(OPENCODE_CONFIG_PATH);
+    if (!opencodeConfig) {
+      if (fs.existsSync(OPENCODE_CONFIG_PATH)) {
+        console.log(`\u2717 Could not parse opencode config at: ${OPENCODE_CONFIG_PATH}`);
+        return 1;
+      } else {
+        console.log(`\u26A0 No opencode config found at: ${OPENCODE_CONFIG_PATH}`);
+        console.log("Nothing to uninstall.");
+        return 0;
+      }
+    }
+    if (!opencodeConfig.plugin || opencodeConfig.plugin.length === 0) {
+      console.log("\u26A0 opencode-swarm is not installed (no plugins configured).");
+      return 0;
+    }
+    const pluginName = "opencode-swarm";
+    const filteredPlugins = opencodeConfig.plugin.filter((p) => p !== pluginName && !p.startsWith(`${pluginName}@`));
+    if (filteredPlugins.length === opencodeConfig.plugin.length) {
+      console.log("\u26A0 opencode-swarm is not installed.");
+      return 0;
+    }
+    opencodeConfig.plugin = filteredPlugins;
+    if (opencodeConfig.agent) {
+      delete opencodeConfig.agent.explore;
+      delete opencodeConfig.agent.general;
+      if (Object.keys(opencodeConfig.agent).length === 0) {
+        delete opencodeConfig.agent;
+      }
+    }
+    saveJson(OPENCODE_CONFIG_PATH, opencodeConfig);
+    console.log("\u2713 Removed opencode-swarm from OpenCode plugins");
+    console.log("\u2713 Re-enabled default OpenCode agents (explore, general)");
+    if (process.argv.includes("--clean")) {
+      let cleaned = false;
+      if (fs.existsSync(PLUGIN_CONFIG_PATH)) {
+        fs.unlinkSync(PLUGIN_CONFIG_PATH);
+        console.log(`\u2713 Removed plugin config: ${PLUGIN_CONFIG_PATH}`);
+        cleaned = true;
+      }
+      if (fs.existsSync(PROMPTS_DIR)) {
+        fs.rmSync(PROMPTS_DIR, { recursive: true });
+        console.log(`\u2713 Removed custom prompts: ${PROMPTS_DIR}`);
+        cleaned = true;
+      }
+      if (!cleaned) {
+        console.log("\u2713 No config files to clean up");
+      }
+    }
+    console.log(`
+\u2705 Uninstall complete!`);
+    return 0;
+  } catch (error) {
+    console.log("\u2717 Uninstall failed: " + (error instanceof Error ? error.message : String(error)));
+    return 1;
+  }
+}
 function printHelp() {
   console.log(`
 opencode-swarm - Architect-centric agentic swarm plugin for OpenCode
@@ -104,8 +164,10 @@ Usage: bunx opencode-swarm [command] [OPTIONS]
 
 Commands:
   install     Install and configure the plugin (default)
+  uninstall   Remove the plugin from OpenCode config
 
 Options:
+  --clean     Also remove config files and custom prompts (with uninstall)
   -h, --help  Show this help message
 
 Configuration:
@@ -122,6 +184,8 @@ Custom Prompts:
 
 Examples:
   bunx opencode-swarm install
+  bunx opencode-swarm uninstall
+  bunx opencode-swarm uninstall --clean
   bunx opencode-swarm --help
 `);
 }
@@ -134,6 +198,9 @@ async function main() {
   const command = args[0] || "install";
   if (command === "install") {
     const exitCode = await install();
+    process.exit(exitCode);
+  } else if (command === "uninstall") {
+    const exitCode = await uninstall();
     process.exit(exitCode);
   } else {
     console.error(`Unknown command: ${command}`);

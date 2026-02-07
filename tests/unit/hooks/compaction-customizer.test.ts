@@ -400,4 +400,86 @@ ${longDecision}
         // 500 chars truncated + '...' (3) + '[SWARM DECISIONS] ' prefix (18) = max 521
         expect(decisionsContext!.length).toBeLessThanOrEqual(500 + 3 + '[SWARM DECISIONS] '.length);
     });
+
+    it('All tasks complete → no [SWARM TASKS] entry', async () => {
+        const planContent = `## Phase 1: Setup [IN PROGRESS]
+- [x] 1.1: Task A
+- [x] 1.2: Task B`;
+        writeFileSync(join(tempDir, '.swarm', 'plan.md'), planContent);
+        writeFileSync(join(tempDir, '.swarm', 'context.md'), '');
+
+        const hook = createCompactionCustomizerHook(defaultConfig, tempDir);
+        const handler = hook['experimental.session.compacting'] as Function;
+        
+        const output = { context: [] as string[] };
+        await handler({ sessionID: 'test-session' }, output);
+        
+        expect(output.context).toContain('[SWARM PLAN] Phase 1: Setup [IN PROGRESS]');
+        expect(output.context).not.toContain('[SWARM TASKS]');
+        expect(output.context).toHaveLength(1);
+    });
+
+    it('Context.md without Patterns section → no [SWARM PATTERNS] entry', async () => {
+        const contextContent = `# Context
+## Decisions
+- Decision 1`;
+        writeFileSync(join(tempDir, '.swarm', 'plan.md'), '');
+        writeFileSync(join(tempDir, '.swarm', 'context.md'), contextContent);
+
+        const hook = createCompactionCustomizerHook(defaultConfig, tempDir);
+        const handler = hook['experimental.session.compacting'] as Function;
+        
+        const output = { context: [] as string[] };
+        await handler({ sessionID: 'test-session' }, output);
+        
+        expect(output.context).toContain('[SWARM DECISIONS] - Decision 1');
+        expect(output.context).not.toContain('[SWARM PATTERNS]');
+        expect(output.context).toHaveLength(1);
+    });
+
+    it('Plan exists with no phase info, no incomplete tasks → only context.md contributions', async () => {
+        const planContent = `# Project Plan
+
+Some text without phases or tasks`;
+        const contextContent = `# Context
+## Decisions
+- Decision 1
+
+## Patterns
+- pattern stuff`;
+        writeFileSync(join(tempDir, '.swarm', 'plan.md'), planContent);
+        writeFileSync(join(tempDir, '.swarm', 'context.md'), contextContent);
+
+        const hook = createCompactionCustomizerHook(defaultConfig, tempDir);
+        const handler = hook['experimental.session.compacting'] as Function;
+        
+        const output = { context: [] as string[] };
+        await handler({ sessionID: 'test-session' }, output);
+        
+        expect(output.context).toContain('[SWARM DECISIONS] - Decision 1');
+        expect(output.context).toContain('[SWARM PATTERNS] - pattern stuff');
+        expect(output.context).not.toContain('[SWARM PLAN]');
+        expect(output.context).not.toContain('[SWARM TASKS]');
+        expect(output.context).toHaveLength(2);
+    });
+
+    it('Plan with incomplete tasks but no IN PROGRESS phase → no [SWARM TASKS] or [SWARM PLAN]', async () => {
+        const planContent = `# Project Plan
+## Phase 1: Setup [COMPLETE]
+- [x] 1.1: Done
+- [ ] 1.2: Still pending (orphaned task in completed phase)`;
+        writeFileSync(join(tempDir, '.swarm', 'plan.md'), planContent);
+        writeFileSync(join(tempDir, '.swarm', 'context.md'), '');
+
+        const hook = createCompactionCustomizerHook(defaultConfig, tempDir);
+        const handler = hook['experimental.session.compacting'] as Function;
+        
+        const output = { context: [] as string[] };
+        await handler({ sessionID: 'test-session' }, output);
+        
+        // extractIncompleteTasks returns null when no IN PROGRESS phase exists
+        expect(output.context).not.toContain('[SWARM TASKS]');
+        expect(output.context).not.toContain('[SWARM PLAN]');
+        expect(output.context).toHaveLength(0);
+    });
 });

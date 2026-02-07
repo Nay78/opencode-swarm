@@ -93,4 +93,19 @@ describe('createSwarmCommandHandler', () => {
         expect(output.parts).toHaveLength(1);
         expect((output.parts[0] as any).type).toBe('text');
     });
+
+    test('handles tab characters in arguments', async () => {
+        const output = { parts: [] as unknown[] };
+        await handler({ command: 'swarm', sessionID: 's1', arguments: 'plan\t2' }, output);
+        expect(output.parts).toHaveLength(1);
+        expect((output.parts[0] as any).type).toBe('text');
+    });
+
+    test('handles subcommand with trailing spaces', async () => {
+        const output = { parts: [] as unknown[] };
+        await handler({ command: 'swarm', sessionID: 's1', arguments: 'agents   ' }, output);
+        expect(output.parts).toHaveLength(1);
+        expect((output.parts[0] as any).type).toBe('text');
+        expect((output.parts[0] as any).text).toContain('architect');
+    });
 });

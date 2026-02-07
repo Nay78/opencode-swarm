@@ -1,10 +1,14 @@
 import type { AgentDefinition } from '../agents';
 import { handleAgentsCommand } from './agents';
+import { handleConfigCommand } from './config';
+import { handleHistoryCommand } from './history';
 import { handlePlanCommand } from './plan';
 import { handleStatusCommand } from './status';
 
 // Re-export individual handlers
 export { handleAgentsCommand } from './agents';
+export { handleConfigCommand } from './config';
+export { handleHistoryCommand } from './history';
 export { handlePlanCommand } from './plan';
 export { handleStatusCommand } from './status';
 
@@ -14,6 +18,8 @@ const HELP_TEXT = [
 	'- `/swarm status` — Show current swarm state',
 	'- `/swarm plan [phase]` — Show plan (optionally filter by phase number)',
 	'- `/swarm agents` — List registered agents',
+	'- `/swarm history` — Show completed phases summary',
+	'- `/swarm config` — Show current resolved configuration',
 ].join('\n');
 
 /**
@@ -48,6 +54,12 @@ export function createSwarmCommandHandler(
 				break;
 			case 'agents':
 				text = handleAgentsCommand(agents);
+				break;
+			case 'history':
+				text = await handleHistoryCommand(directory, args);
+				break;
+			case 'config':
+				text = await handleConfigCommand(directory, args);
 				break;
 			default:
 				text = HELP_TEXT;

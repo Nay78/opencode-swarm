@@ -571,4 +571,171 @@ describe('context-budget hook', () => {
 			expect(output.messages[0].parts[1].text).toBe('more text here');
 		});
 	});
+
+	describe('Edge case: exactly at 90% critical threshold boundary', () => {
+		test('exactly 90% should trigger warn, not critical', async () => {
+			const config = { 
+				context_budget: { 
+					enabled: true,
+					model_limits: { default: 100 },
+				},
+				max_iterations: 5,
+				qa_retry_limit: 3,
+				inject_phase_reminders: true,
+			};
+			
+			const handler = createContextBudgetHandler(config);
+			const output = {
+				messages: makeMessages(272, 'architect'), // 90 tokens = 90%
+			};
+			
+			await handler({}, output);
+			
+			const modifiedText = output.messages[0].parts[0].text;
+			expect(modifiedText).toContain('CONTEXT WARNING');
+			expect(modifiedText).not.toContain('CONTEXT CRITICAL');
+			expect(modifiedText).toContain('~90%');
+			expect(modifiedText.endsWith('x'.repeat(272))).toBe(true);
+		});
+	});
+
+	describe('Edge case: default thresholds when not specified', () => {
+		test('uses default warn threshold when not specified', async () => {
+			const config = { 
+				context_budget: { 
+					enabled: true,
+					model_limits: { default: 100 },
+				},
+				max_iterations: 5,
+				qa_retry_limit: 3,
+				inject_phase_reminders: true,
+			};
+			
+			const handler = createContextBudgetHandler(config);
+			const output = {
+				messages: makeMessages(227, 'architect'), // ~75 tokens = 75% > 70% default warn threshold
+			};
+			
+			await handler({}, output);
+			
+			const modifiedText = output.messages[0].parts[0].text;
+			expect(modifiedText).toContain('CONTEXT WARNING');
+			expect(modifiedText).toContain('~75%');
+		});
+	});
+
+	describe('Edge case: messages with missing parts array', () => {
+		test('handles message without parts property', async () => {
+			const config = { 
+				context_budget: { 
+					enabled: true,
+					model_limits: { default: 100 },
+				},
+				max_iterations: 5,
+				qa_retry_limit: 3,
+				inject_phase_reminders: true,
+			};
+			
+			const handler = createContextBudgetHandler(config);
+			const output = {
+				messages: [
+					{ info: { role: 'user', agent: 'architect' } }, // Missing parts property
+					{
+						info: { role: 'user', agent: 'architect' },
+						parts: [{ type: 'text', text: 'normal message' }],
+					},
+				],
+			};
+			
+			// Should not crash
+			await handler({}, output);
+			
+			// Normal message should remain unchanged
+			expect(output.messages[1].parts[0].text).toBe('normal message');
+		});
+	});
+
+	describe('Edge case: parts with null/empty text', () => {
+		test('handles empty and missing text fields', async () => {
+			const config = { 
+				context_budget: { 
+					enabled: true,
+					model_limits: { default: 100 },
+				},
+				max_iterations: 5,
+				qa_retry_limit: 3,
+				inject_phase_reminders: true,
+			};
+			
+			const handler = createContextBudgetHandler(config);
+			const output = {
+				messages: [{
+					info: { role: 'user', agent: 'architect' },
+					parts: [
+						{ type: 'text', text: '' }, // Empty text
+						{ type: 'text' }, // Missing text property
+						{ type: 'text', text: 'valid text' },
+					],
+				}],
+			};
+			
+			// Should not crash
+			await handler({}, output);
+			
+			// Valid text should remain unchanged
+			expect(output.messages[0].parts[2].text).toBe('valid text');
+		});
+	});
+
+	describe('Edge case: last user message has no parts', () => {
+		test('handles last user message without parts field', async () => {
+			const config = { 
+				context_budget: { 
+					enabled: true,
+					model_limits: { default: 100 },
+				},
+				max_iterations: 5,
+				qa_retry_limit: 3,
+				inject_phase_reminders: true,
+			};
+			
+			const handler = createContextBudgetHandler(config);
+			const output = {
+				messages: [
+					{
+						info: { role: 'assistant' },
+						parts: [{ type: 'text', text: 'x'.repeat(300) }],
+					},
+					{ info: { role: 'user', agent: 'architect' } }, // No parts field
+				],
+			};
+			
+			await handler({}, output);
+			
+			// Assistant message should remain unchanged since it's not a user message
+			expect(output.messages[0].parts[0].text).toBe('x'.repeat(300));
+			// User message should remain unchanged since it has no parts
+			expect(output.messages[1]).toEqual({ info: { role: 'user', agent: 'architect' } });
+		});
+	});
+
+	describe('Edge case: context_budget entirely missing from config', () => {
+		test('handler enabled by default when context_budget missing', async () => {
+			const config = { 
+				max_iterations: 5,
+				qa_retry_limit: 3,
+				inject_phase_reminders: true,
+			};
+			
+			const handler = createContextBudgetHandler(config);
+			const output = {
+				messages: makeMessages(100, 'architect'), // Small text, well below default 128k limit
+			};
+			
+			await handler({}, output);
+			
+			// Since we're well below the default 128k limit (100 tokens vs 128k), no warning should be injected
+			expect(output.messages[0].parts[0].text).toBe('x'.repeat(100));
+		});
+	});
 });
