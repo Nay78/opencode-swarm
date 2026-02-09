@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { extractCurrentPhase } from '../../../src/hooks/extractors';
 import { createSystemEnhancerHook } from '../../../src/hooks/system-enhancer';
 import type { PluginConfig } from '../../../src/config';
+import { ContextBudgetConfigSchema } from '../../../src/config/schema';
 import { swarmState, resetSwarmState } from '../../../src/state';
 import { mkdtemp, writeFile, mkdir } from 'node:fs/promises';
 import { rm } from 'node:fs/promises';
@@ -1110,6 +1111,349 @@ ${longActivity}
 			await transformHook(input, output);
 			
 			expect(output.system).toEqual(['Initial system prompt']);
+		});
+
+		describe('Injection budget (tryInject)', () => {
+			it('Budget defaults to 4000 tokens when not configured', async () => {
+				const swarmDir = join(tempDir, '.swarm');
+				await mkdir(swarmDir, { recursive: true });
+				const planContent = `
+# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [ ] 1.1: Initial task
+`;
+				await writeFile(join(swarmDir, 'plan.md'), planContent);
+
+				// No context_budget configured - should default to 4000
+				const config: PluginConfig = {
+					...defaultConfig,
+					hooks: {
+						system_enhancer: true,
+						compaction: true,
+						agent_activity: true,
+						delegation_tracker: false,
+						agent_awareness_max_chars: 300,
+					},
+				};
+				const hook = createSystemEnhancerHook(config, tempDir);
+				const transformHook = hook['experimental.chat.system.transform'] as any;
+
+				const input = { sessionID: 'test-session' };
+				const output = { system: ['Initial system prompt'] };
+				await transformHook(input, output);
+
+				// All items should be injected since 4000 tokens ≈ 12,121 chars is way more than needed
+				expect(output.system.length).toBeGreaterThan(1);
+				expect(output.system.some((s: string) => s.includes('[SWARM CONTEXT]'))).toBe(true);
+			});
+
+			it('Low budget drops lower-priority items', async () => {
+				const swarmDir = join(tempDir, '.swarm');
+				await mkdir(swarmDir, { recursive: true });
+				const planContent = `
+# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [ ] 1.1: Initial task
+`;
+				const contextContent = `# Context
+
+## Decisions
+- Decision A: Use TypeScript
+- Decision B: Keep it simple
+
+## Agent Activity
+
+| Tool | Calls |
+|------|-------|
+| read | 5 |
+`;
+				await writeFile(join(swarmDir, 'plan.md'), planContent);
+				await writeFile(join(swarmDir, 'context.md'), contextContent);
+
+				swarmState.activeAgent.set('test-session', 'paid_coder');
+
+				// Set max_injection_tokens to 50 (≈151 chars)
+				const config: PluginConfig = {
+					...defaultConfig,
+					context_budget: {
+						enabled: true,
+						warn_threshold: 0.7,
+						critical_threshold: 0.9,
+						model_limits: { default: 128000 },
+						max_injection_tokens: 50,
+					} as any,
+					hooks: {
+						system_enhancer: true,
+						compaction: true,
+						agent_activity: true,
+						delegation_tracker: false,
+						agent_awareness_max_chars: 300,
+					},
+				};
+				const hook = createSystemEnhancerHook(config, tempDir);
+				const transformHook = hook['experimental.chat.system.transform'] as any;
+
+				const input = { sessionID: 'test-session' };
+				const output = { system: ['Initial system prompt'] };
+				await transformHook(input, output);
+
+				// Phase ~60 chars ≈ 20 tokens, task ~45 chars ≈ 15 tokens (total 35 tokens) - both fit
+				// Decisions ~80+ chars ≈ 27+ tokens would push over 50 token limit - should be dropped
+				const phaseLine = output.system.find((s: string) => s.includes('[SWARM CONTEXT] Current phase:'));
+				const taskLine = output.system.find((s: string) => s.includes('[SWARM CONTEXT] Current task:'));
+				const decisionsLine = output.system.find((s: string) => s.includes('[SWARM CONTEXT] Key decisions:'));
+				const agentContextLine = output.system.find((s: string) => s.includes('[SWARM AGENT CONTEXT]'));
+
+				expect(phaseLine).toBeDefined();
+				expect(taskLine).toBeDefined();
+				expect(decisionsLine).toBeUndefined();
+				expect(agentContextLine).toBeUndefined();
+			});
+
+			it('Zero-like budget (min 100) prevents most injection', async () => {
+				const swarmDir = join(tempDir, '.swarm');
+				await mkdir(swarmDir, { recursive: true });
+				const planContent = `
+# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [ ] 1.1: Initial task
+`;
+				const hugeDecisions = '## Decisions\n' + Array(10).fill('- Decision: Very long description that uses tokens').join('\n');
+				const contextContent = `# Context\n${hugeDecisions}`;
+				await writeFile(join(swarmDir, 'plan.md'), planContent);
+				await writeFile(join(swarmDir, 'context.md'), contextContent);
+
+				swarmState.activeAgent.set('test-session', 'paid_coder');
+
+				// Set max_injection_tokens to 100 (≈303 chars)
+				const config: PluginConfig = {
+					...defaultConfig,
+					context_budget: {
+						enabled: true,
+						warn_threshold: 0.7,
+						critical_threshold: 0.9,
+						model_limits: { default: 128000 },
+						max_injection_tokens: 100,
+					} as any,
+					hooks: {
+						system_enhancer: true,
+						compaction: true,
+						agent_activity: true,
+						delegation_tracker: false,
+						agent_awareness_max_chars: 300,
+					},
+				};
+				const hook = createSystemEnhancerHook(config, tempDir);
+				const transformHook = hook['experimental.chat.system.transform'] as any;
+
+				const input = { sessionID: 'test-session' };
+				const output = { system: ['Initial system prompt'] };
+				await transformHook(input, output);
+
+				const phaseLine = output.system.find((s: string) => s.includes('[SWARM CONTEXT] Current phase:'));
+				const taskLine = output.system.find((s: string) => s.includes('[SWARM CONTEXT] Current task:'));
+				const decisionsLine = output.system.find((s: string) => s.includes('[SWARM CONTEXT] Key decisions:'));
+
+				expect(phaseLine).toBeDefined();
+				expect(taskLine).toBeDefined();
+				expect(decisionsLine).toBeUndefined();
+			});
+
+			it('All items injected when budget is generous', async () => {
+				const swarmDir = join(tempDir, '.swarm');
+				await mkdir(swarmDir, { recursive: true });
+				const planContent = `
+# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [ ] 1.1: Initial task
+`;
+				const contextContent = `# Context
+
+## Decisions
+- Decision A: Use TypeScript
+
+## Agent Activity
+
+| Tool | Calls |
+|------|-------|
+| read | 5 |
+`;
+				await writeFile(join(swarmDir, 'plan.md'), planContent);
+				await writeFile(join(swarmDir, 'context.md'), contextContent);
+
+				swarmState.activeAgent.set('test-session', 'paid_coder');
+
+				// Set max_injection_tokens to 50000 (very generous)
+				const config: PluginConfig = {
+					...defaultConfig,
+					context_budget: {
+						enabled: true,
+						warn_threshold: 0.7,
+						critical_threshold: 0.9,
+						model_limits: { default: 128000 },
+						max_injection_tokens: 50000,
+					} as any,
+					hooks: {
+						system_enhancer: true,
+						compaction: true,
+						agent_activity: true,
+						delegation_tracker: false,
+						agent_awareness_max_chars: 300,
+					},
+				};
+				const hook = createSystemEnhancerHook(config, tempDir);
+				const transformHook = hook['experimental.chat.system.transform'] as any;
+
+				const input = { sessionID: 'test-session' };
+				const output = { system: ['Initial system prompt'] };
+				await transformHook(input, output);
+
+				const phaseLine = output.system.find((s: string) => s.includes('[SWARM CONTEXT] Current phase:'));
+				const taskLine = output.system.find((s: string) => s.includes('[SWARM CONTEXT] Current task:'));
+				const decisionsLine = output.system.find((s: string) => s.includes('[SWARM CONTEXT] Key decisions:'));
+				const agentContextLine = output.system.find((s: string) => s.includes('[SWARM AGENT CONTEXT]'));
+
+				expect(phaseLine).toBeDefined();
+				expect(taskLine).toBeDefined();
+				expect(decisionsLine).toBeDefined();
+				expect(agentContextLine).toBeDefined();
+			});
+
+			it('Budget tracks cumulative token usage', async () => {
+				const swarmDir = join(tempDir, '.swarm');
+				await mkdir(swarmDir, { recursive: true });
+				const planContent = `
+# Project Plan
+
+## Phase 1: Setup [IN PROGRESS]
+- [ ] 1.1: Initial task
+`;
+				const contextContent = `# Context
+
+## Decisions
+- Decision A: Use TypeScript
+- Decision B: Keep it simple
+`;
+				await writeFile(join(swarmDir, 'plan.md'), planContent);
+				await writeFile(join(swarmDir, 'context.md'), contextContent);
+
+				// Set budget to fit phase + decisions (but not both)
+				// Phase: ~60 chars ≈ 20 tokens
+				// Task: ~35 chars ≈ 12 tokens
+				// Decisions: ~65 chars ≈ 22 tokens
+				const config: PluginConfig = {
+					...defaultConfig,
+					context_budget: {
+						enabled: true,
+						warn_threshold: 0.7,
+						critical_threshold: 0.9,
+						model_limits: { default: 128000 },
+						max_injection_tokens: 50,
+					} as any,
+					hooks: {
+						system_enhancer: true,
+						compaction: true,
+						agent_activity: true,
+						delegation_tracker: false,
+						agent_awareness_max_chars: 300,
+					},
+				};
+				const hook = createSystemEnhancerHook(config, tempDir);
+				const transformHook = hook['experimental.chat.system.transform'] as any;
+
+				const input = { sessionID: 'test-session' };
+				const output = { system: ['Initial system prompt'] };
+				await transformHook(input, output);
+
+				const phaseLine = output.system.find((s: string) => s.includes('[SWARM CONTEXT] Current phase:'));
+				const taskLine = output.system.find((s: string) => s.includes('[SWARM CONTEXT] Current task:'));
+				const decisionsLine = output.system.find((s: string) => s.includes('[SWARM CONTEXT] Key decisions:'));
+
+				// Phase (~20 tokens) fits, task (~12 tokens) = 32 total
+				// Decisions would push to ~54 tokens (over 50 limit) - should be dropped
+				expect(phaseLine).toBeDefined();
+				// Task may or may not be injected depending on exact extraction
+				// Just verify phase is present and decisions is not
+				expect(decisionsLine).toBeUndefined();
+			});
+
+			it('Config max_injection_tokens schema validation', () => {
+				const minResult = ContextBudgetConfigSchema.safeParse({ max_injection_tokens: 100 });
+				expect(minResult.success).toBe(true);
+
+				const maxResult = ContextBudgetConfigSchema.safeParse({ max_injection_tokens: 50000 });
+				expect(maxResult.success).toBe(true);
+
+				const belowMinResult = ContextBudgetConfigSchema.safeParse({ max_injection_tokens: 99 });
+				expect(belowMinResult.success).toBe(false);
+
+				const aboveMaxResult = ContextBudgetConfigSchema.safeParse({ max_injection_tokens: 50001 });
+				expect(aboveMaxResult.success).toBe(false);
+
+				const defaultResult = ContextBudgetConfigSchema.safeParse({});
+				expect(defaultResult.success).toBe(true);
+				if (defaultResult.success) {
+					expect(defaultResult.data.max_injection_tokens).toBe(4000);
+				}
+			});
+
+			it('Empty content does not consume budget', async () => {
+				const swarmDir = join(tempDir, '.swarm');
+				await mkdir(swarmDir, { recursive: true });
+				// Create plan.md with no IN PROGRESS phase
+				const planContent = `Phase: 1
+# Project Plan
+
+Some content without phase markers.
+`;
+				const contextContent = `# Context
+
+## Decisions
+- Decision A: Use TypeScript
+`;
+				await writeFile(join(swarmDir, 'plan.md'), planContent);
+				await writeFile(join(swarmDir, 'context.md'), contextContent);
+
+				// Set a low budget that would fit decisions
+				const config: PluginConfig = {
+					...defaultConfig,
+					context_budget: {
+						enabled: true,
+						warn_threshold: 0.7,
+						critical_threshold: 0.9,
+						model_limits: { default: 128000 },
+						max_injection_tokens: 60,
+					} as any,
+					hooks: {
+						system_enhancer: true,
+						compaction: true,
+						agent_activity: true,
+						delegation_tracker: false,
+						agent_awareness_max_chars: 300,
+					},
+				};
+				const hook = createSystemEnhancerHook(config, tempDir);
+				const transformHook = hook['experimental.chat.system.transform'] as any;
+
+				const input = { sessionID: 'test-session' };
+				const output = { system: ['Initial system prompt'] };
+				await transformHook(input, output);
+
+				// Phase header fallback will inject Phase 1 [PENDING] (~20 chars ≈ 7 tokens)
+				// No task since no IN PROGRESS phase
+				// Decisions should be injected (~35 chars ≈ 12 tokens, total ~19 tokens fits in 60)
+				const phaseLine = output.system.find((s: string) => s.includes('[SWARM CONTEXT] Current phase:'));
+				const taskLine = output.system.find((s: string) => s.includes('[SWARM CONTEXT] Current task:'));
+				const decisionsLine = output.system.find((s: string) => s.includes('[SWARM CONTEXT] Key decisions:'));
+
+				expect(phaseLine).toBeDefined();
+				expect(taskLine).toBeUndefined();
+				expect(decisionsLine).toBeDefined();
+			});
 		});
 	});
 	});

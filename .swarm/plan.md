@@ -46,6 +46,6 @@ Upgrade opencode-swarm from "workflow + prompts" to "workflow + verifiable execu
 
 ## Phase 5: Context Injection Budget + Documentation [PENDING]
 
-- [ ] 5.1: Structured injection budget in system-enhancer.ts [SMALL]
+- [x] 5.1: Structured injection budget in system-enhancer.ts [SMALL]
 - [ ] 5.2: Update README, CHANGELOG, docs for v5.0.0 [SMALL]
 - [ ] 5.3: Version bump to 5.0.0 + final verification [SMALL]

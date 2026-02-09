@@ -36,6 +36,7 @@ export const ContextBudgetConfigSchema = z.object({
 	model_limits: z
 		.record(z.string(), z.number().min(1000))
 		.default({ default: 128000 }),
+	max_injection_tokens: z.number().min(100).max(50000).default(4000),
 });
 
 export type ContextBudgetConfig = z.infer<typeof ContextBudgetConfigSchema>;

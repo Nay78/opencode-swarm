@@ -17,7 +17,7 @@ import {
 	extractCurrentTaskFromPlan,
 	extractDecisions,
 } from './extractors';
-import { readSwarmFileAsync, safeHook } from './utils';
+import { estimateTokens, readSwarmFileAsync, safeHook } from './utils';
 
 /**
  * Creates the experimental.chat.system.transform hook for system enhancement.
@@ -39,53 +39,59 @@ export function createSystemEnhancerHook(
 				output: { system: string[] },
 			): Promise<void> => {
 				try {
+					const maxInjectionTokens =
+						config.context_budget?.max_injection_tokens ??
+						Number.POSITIVE_INFINITY;
+					let injectedTokens = 0;
+
+					function tryInject(text: string): void {
+						const tokens = estimateTokens(text);
+						if (injectedTokens + tokens > maxInjectionTokens) {
+							return;
+						}
+						output.system.push(text);
+						injectedTokens += tokens;
+					}
+
 					const contextContent = await readSwarmFileAsync(
 						directory,
 						'context.md',
 					);
 
-					// Try structured plan first
+					// Priority 1: Current phase
 					const plan = await loadPlan(directory);
 					if (plan && plan.migration_status !== 'migration_failed') {
 						const currentPhase = extractCurrentPhaseFromPlan(plan);
 						if (currentPhase) {
-							output.system.push(
-								`[SWARM CONTEXT] Current phase: ${currentPhase}`,
-							);
+							tryInject(`[SWARM CONTEXT] Current phase: ${currentPhase}`);
 						}
+						// Priority 2: Current task
 						const currentTask = extractCurrentTaskFromPlan(plan);
 						if (currentTask) {
-							output.system.push(
-								`[SWARM CONTEXT] Current task: ${currentTask}`,
-							);
+							tryInject(`[SWARM CONTEXT] Current task: ${currentTask}`);
 						}
 					} else {
-						// Legacy fallback: read plan.md as string
 						const planContent = await readSwarmFileAsync(directory, 'plan.md');
 						if (planContent) {
 							const currentPhase = extractCurrentPhase(planContent);
 							if (currentPhase) {
-								output.system.push(
-									`[SWARM CONTEXT] Current phase: ${currentPhase}`,
-								);
+								tryInject(`[SWARM CONTEXT] Current phase: ${currentPhase}`);
 							}
 							const currentTask = extractCurrentTask(planContent);
 							if (currentTask) {
-								output.system.push(
-									`[SWARM CONTEXT] Current task: ${currentTask}`,
-								);
+								tryInject(`[SWARM CONTEXT] Current task: ${currentTask}`);
 							}
 						}
 					}
 
-					// Inject recent decisions (top 3, truncated to 200 chars)
+					// Priority 3: Decisions
 					if (contextContent) {
 						const decisions = extractDecisions(contextContent, 200);
 						if (decisions) {
-							output.system.push(`[SWARM CONTEXT] Key decisions: ${decisions}`);
+							tryInject(`[SWARM CONTEXT] Key decisions: ${decisions}`);
 						}
 
-						// Inject cross-agent context if agent activity tracking is enabled
+						// Priority 4 (lowest): Agent context
 						if (config.hooks?.agent_activity !== false && _input.sessionID) {
 							const activeAgent = swarmState.activeAgent.get(_input.sessionID);
 							if (activeAgent) {
@@ -95,7 +101,7 @@ export function createSystemEnhancerHook(
 									config.hooks?.agent_awareness_max_chars ?? 300,
 								);
 								if (agentContext) {
-									output.system.push(`[SWARM AGENT CONTEXT] ${agentContext}`);
+									tryInject(`[SWARM AGENT CONTEXT] ${agentContext}`);
 								}
 							}
 						}
