@@ -190,8 +190,12 @@ All tasks in phase done
 ```
 project/
 ├── .swarm/
-│   ├── plan.md            # Phased roadmap with task status
+│   ├── plan.md            # Legacy phased roadmap (migrated to plan.json)
+│   ├── plan.json          # Machine-readable plan with Zod-validated schema
 │   ├── context.md         # Project knowledge, SME cache
+│   ├── evidence/          # Per-task execution evidence
+│   │   ├── 1.1/           # Evidence for task 1.1
+│   │   └── 2.3/           # Evidence for task 2.3
 │   └── history/
 │       ├── phase-1.md     # Archived phase summaries
 │       └── phase-2.md
@@ -201,11 +205,14 @@ project/
 │   ├── state.ts           # Shared swarm state singleton (zero imports)
 │   ├── agents/            # Agent definitions and factory
 │   ├── config/            # Schema, constants, loader
-│   ├── commands/          # Slash command handlers
+│   ├── commands/          # Slash command handlers (10 commands)
 │   │   ├── index.ts       # Factory + dispatcher (createSwarmCommandHandler)
 │   │   ├── status.ts      # /swarm status
 │   │   ├── plan.ts        # /swarm plan [N]
-│   │   └── agents.ts      # /swarm agents
+│   │   ├── agents.ts      # /swarm agents
+│   │   ├── evidence.ts    # /swarm evidence [task]
+│   │   ├── archive.ts     # /swarm archive [--dry-run]
+│   │   └── reset.ts       # /swarm reset --confirm
 │   ├── hooks/             # Hook handlers
 │   │   ├── index.ts       # Barrel exports
 │   │   ├── utils.ts       # safeHook, composeHandlers, readSwarmFileAsync, estimateTokens
@@ -216,17 +223,28 @@ project/
 │   │   ├── compaction-customizer.ts # Session compaction enrichment
 │   │   ├── agent-activity.ts        # Tool hooks (activity tracking + flush)
 │   │   └── delegation-tracker.ts    # Chat message hook (active agent tracking)
-│   └── tools/             # Domain detector, file extractor, gitingest
+│   ├── tools/             # Domain detector, file extractor, gitingest
+│   ├── plan/              # Plan management
+│   │   └── manager.ts     # load/save/migrate/derive plan operations
+│   └── evidence/          # Evidence bundle management
+│       ├── index.ts       # Barrel exports
+│       └── manager.ts     # CRUD: save/load/list/delete/archive evidence
 │
-├── tests/unit/            # 447 tests across 21 files (bun test)
+├── tests/unit/            # 876 tests across 39 files (bun test)
 │   ├── agents/            # creation (64), factory (20)
-│   ├── config/            # constants (14), schema (27), loader (17)
-│   ├── hooks/             # pipeline-tracker (16), utils (25), system-enhancer (39),
+│   ├── config/            # constants (14), schema (35), loader (17), plan-schema (40),
+│   │                      # evidence-schema (23), evidence-config (8)
+│   ├── hooks/             # pipeline-tracker (16), utils (25), system-enhancer (58),
 │   │                      # compaction-customizer (26), context-budget (23),
-│   │                      # extractors (32), agent-activity (14), delegation-tracker (16)
-│   ├── commands/          # status (6), plan (9), agents (13), index (11)
+│   │                      # extractors (32), agent-activity (14), delegation-tracker (16),
+│   │                      # guardrails (39)
+│   ├── commands/          # status (6), plan (9), agents (28), index (11),
+│   │                      # archive (8)
+│   ├── evidence/          # manager (25)
+│   ├── plan/              # manager (40)
 │   ├── tools/             # domain-detector (30), file-extractor (16), gitingest (5)
-│   └── state.test.ts      # Shared state (24)
+│   ├── smoke/             # packaging (8)
+│   └── state.test.ts      # Shared state (31)
 │
 └── dist/                  # Build output (ESM)
 ```
@@ -395,7 +413,7 @@ Persistent `.swarm/` files provide:
 
 ## Hooks System
 
-The hooks system is the foundation of v4.3.0. All features are built as hook handlers registered on OpenCode's Plugin API.
+The hooks system is the foundation of v4.3.0+. All features are built as hook handlers registered on OpenCode's Plugin API.
 
 ### Core Utilities
 
@@ -448,19 +466,70 @@ Registered on `experimental.chat.system.transform`:
 - Injects current phase + task from plan.md (~200 chars)
 - Injects top 3 most recent decisions from context.md
 - Keeps agents focused even after conversation history is compacted
+- Respects `max_injection_tokens` budget (default: 4,000 tokens)
+- Priority ordering: phase → task → decisions → agent context
+- Lower-priority items dropped when budget is exhausted
+
+---
+
+## Evidence System
+
+The evidence system persists verifiable execution artifacts per task.
+
+### Evidence Types
+
+| Type | Fields | Purpose |
+|------|--------|---------|
+| `review` | risk, issues[] | Reviewer findings |
+| `test` | tests_passed, tests_failed | Test engineer results |
+| `diff` | files_changed[], additions, deletions | Code change summary |
+| `approval` | (base fields only) | Explicit approval record |
+| `note` | (base fields only) | Free-form annotation |
+
+### Storage
+
+```
+.swarm/evidence/
+├── 1.1/
+│   └── evidence.json    # EvidenceBundleSchema (array of entries)
+└── 2.3/
+    ├── evidence.json
+    └── diff.patch       # Optional raw diff
+```
+
+### Security
+
+- Task IDs are sanitized: regex `^[\w-]+(\.[\w-]+)*$`, rejects `..`, null bytes, control chars
+- Two-layer path validation: sanitize task ID + `validateSwarmPath()` on full path
+- Size limits: JSON 500KB, diff.patch 5MB, total per task 20MB
+- Atomic writes via temp+rename pattern
+
+### Retention
+
+Configurable via `evidence` config:
+- `max_age_days`: Archive evidence older than N days (default: 90)
+- `max_bundles`: Maximum evidence bundles before auto-archive (default: 1000)
+- `auto_archive`: Enable automatic archiving (default: false)
 
 ---
 
 ## Slash Commands
 
-Three commands registered under `/swarm`:
+Ten commands registered under `/swarm`:
 
 | Command | Description |
 |---------|-------------|
 | `/swarm status` | Shows current phase, task progress (completed/total), and agent count |
 | `/swarm plan` | Displays full plan.md content |
 | `/swarm plan N` | Displays only Phase N from plan.md |
-| `/swarm agents` | Lists all registered agents with model, temperature, and read-only status |
+| `/swarm agents` | Lists all registered agents with model, temperature, read-only status, and guardrail profiles |
+| `/swarm history` | View completed phases with status icons |
+| `/swarm config` | View current resolved plugin configuration |
+| `/swarm diagnose` | Health check for .swarm/ files, plan structure, and evidence completeness |
+| `/swarm export` | Export plan and context as portable JSON |
+| `/swarm reset --confirm` | Clear swarm state files (with safety gate) |
+| `/swarm evidence [task]` | View evidence bundles for a task or list all tasks with evidence |
+| `/swarm archive [--dry-run]` | Archive old evidence bundles with retention policy |
 
 ### Implementation
 

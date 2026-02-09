@@ -155,13 +155,13 @@ OUTPUT: VERDICT + RISK + ISSUES
 
 | Tool | Calls | Success | Failed | Avg Duration |
 |------|-------|---------|--------|--------------|
-| read | 320 | 320 | 0 | 5ms |
-| bash | 225 | 225 | 0 | 1083ms |
-| edit | 188 | 188 | 0 | 1027ms |
-| task | 43 | 43 | 0 | 167621ms |
-| todowrite | 35 | 35 | 0 | 2ms |
+| read | 346 | 346 | 0 | 5ms |
+| bash | 243 | 243 | 0 | 1056ms |
+| edit | 207 | 207 | 0 | 944ms |
+| task | 48 | 48 | 0 | 155416ms |
+| todowrite | 39 | 39 | 0 | 2ms |
+| grep | 28 | 28 | 0 | 71ms |
 | write | 27 | 27 | 0 | 3057ms |
-| grep | 22 | 22 | 0 | 75ms |
-| glob | 18 | 18 | 0 | 28ms |
-| memory_set | 1 | 1 | 0 | 8ms |
+| glob | 19 | 19 | 0 | 28ms |
+| memory_set | 2 | 2 | 0 | 6ms |
 | invalid | 1 | 1 | 0 | 1ms |

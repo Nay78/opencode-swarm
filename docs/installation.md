@@ -348,8 +348,10 @@ Swarm creates a `.swarm/` directory in your project:
 
 ```
 .swarm/
-├── plan.md        # Phased roadmap with tasks
+├── plan.md        # Legacy phased roadmap (migrated to plan.json)
+├── plan.json      # Machine-readable plan with Zod-validated schema
 ├── context.md     # Project knowledge, SME cache
+├── evidence/      # Per-task execution evidence bundles
 └── history/       # Archived phase summaries
 ```
 
@@ -378,6 +380,11 @@ Swarm automatically resumes projects:
 To start fresh:
 ```bash
 rm -rf .swarm/
+```
+
+Or use the slash command:
+```
+/swarm reset --confirm
 ```
 
 ---
@@ -450,7 +457,7 @@ bun test && bun run build && bun run typecheck && bun run lint
 
 ---
 
-## Hooks Configuration (v4.3.0)
+## Hooks Configuration
 
 Control which hooks are active:
 
@@ -476,7 +483,7 @@ Control which hooks are active:
 
 ---
 
-## Context Budget Configuration (v4.3.0)
+## Context Budget Configuration
 
 Monitor and warn about context window usage:
 
@@ -500,6 +507,7 @@ Monitor and warn about context window usage:
 | `warn_threshold` | number | `0.7` | Inject warning message at this percentage of token limit |
 | `critical_threshold` | number | `0.9` | Inject critical warning at this percentage of token limit |
 | `model_limits` | object | `{ "default": 128000 }` | Token limits per model. Use `"default"` as fallback. |
+| `max_injection_tokens` | number | `4000` | Maximum tokens for system prompt injection. Priority-ordered: phase → task → decisions → agent context |
 
 ### How It Works
 
@@ -510,9 +518,66 @@ Monitor and warn about context window usage:
 
 ---
 
-## Slash Commands (v4.3.0)
+## Evidence Configuration
 
-Three commands are available under `/swarm`:
+Configure evidence bundle retention:
+
+```json
+{
+  "evidence": {
+    "enabled": true,
+    "max_age_days": 90,
+    "max_bundles": 1000,
+    "auto_archive": false
+  }
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | boolean | `true` | Enable evidence bundle persistence |
+| `max_age_days` | number | `90` | Archive evidence older than N days |
+| `max_bundles` | number | `1000` | Maximum evidence bundles before auto-archive |
+| `auto_archive` | boolean | `false` | Enable automatic archiving of old evidence |
+
+---
+
+## Guardrails Configuration
+
+Control agent execution limits:
+
+```json
+{
+  "guardrails": {
+    "enabled": true,
+    "max_tool_calls": 200,
+    "max_duration_minutes": 30,
+    "max_repetitions": 10,
+    "max_consecutive_errors": 5,
+    "warning_threshold": 0.5,
+    "profiles": {
+      "coder": { "max_tool_calls": 300, "max_duration_minutes": 60 },
+      "explorer": { "max_tool_calls": 100, "max_duration_minutes": 10 }
+    }
+  }
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | boolean | `true` | Enable guardrail limits for all agents |
+| `max_tool_calls` | number | `200` | Maximum tool calls per agent task |
+| `max_duration_minutes` | number | `30` | Maximum minutes per agent task |
+| `max_repetitions` | number | `10` | Maximum repetitions of similar tool calls |
+| `max_consecutive_errors` | number | `5` | Maximum consecutive tool errors before circuit break |
+| `warning_threshold` | number | `0.5` | Inject warning at this percentage of any limit |
+| `profiles` | object | — | Per-agent overrides. Keys are agent names, values override base settings. |
+
+---
+
+## Slash Commands
+
+Ten commands are available under `/swarm`:
 
 ### `/swarm status`
 
@@ -543,13 +608,41 @@ Shows the Phase 2 section including all tasks, dependencies, and status.
 
 ### `/swarm agents`
 
-Lists all registered agents with their configuration:
+Lists all registered agents with their configuration including guardrail profiles:
 
 ```
-| Agent          | Model                        | Temp | Read-Only |
-|----------------|------------------------------|------|-----------|
-| architect      | anthropic/claude-sonnet-4-5   | 0.1  | No        |
-| explorer       | google/gemini-2.0-flash      | 0.1  | Yes       |
-| coder          | anthropic/claude-sonnet-4-5   | 0.2  | No        |
-| ...            | ...                          | ...  | ...       |
+| Agent          | Model                        | Temp | Read-Only | Guardrails        |
+|----------------|------------------------------|------|-----------|-------------------|
+| architect      | anthropic/claude-sonnet-4-5   | 0.1  | No        | max_tools: 200    |
+| explorer       | google/gemini-2.0-flash      | 0.1  | Yes       | max_tools: 200    |
+| coder          | anthropic/claude-sonnet-4-5   | 0.2  | No        | max_tools: 200    |
+| ...            | ...                          | ...  | ...       | ...               |
 ```
+
+### `/swarm history`
+
+View completed phases with status icons.
+
+### `/swarm config`
+
+View current resolved plugin configuration.
+
+### `/swarm diagnose`
+
+Health check for `.swarm/` files, plan structure, and evidence completeness.
+
+### `/swarm export`
+
+Export plan and context as portable JSON.
+
+### `/swarm reset --confirm`
+
+Clear swarm state files. Requires `--confirm` flag as a safety gate.
+
+### `/swarm evidence [task]`
+
+View evidence bundles for a specific task, or list all tasks with evidence when no task ID is provided.
+
+### `/swarm archive [--dry-run]`
+
+Archive old evidence bundles based on the retention policy. Use `--dry-run` to preview what would be archived.
