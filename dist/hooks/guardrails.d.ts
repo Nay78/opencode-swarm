@@ -6,7 +6,7 @@
  * - Layer 1 (Soft Warning @ warning_threshold): Sets warning flag for messagesTransform to inject warning
  * - Layer 2 (Hard Block @ 100%): Throws error in toolBefore to block further calls, injects STOP message
  */
-import type { GuardrailsConfig } from '../config/schema';
+import { type GuardrailsConfig } from '../config/schema';
 /**
  * Creates guardrails hooks for circuit breaker protection
  * @param config Guardrails configuration

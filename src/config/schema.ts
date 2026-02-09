@@ -50,6 +50,17 @@ export const EvidenceConfigSchema = z.object({
 
 export type EvidenceConfig = z.infer<typeof EvidenceConfigSchema>;
 
+// Guardrails profile (per-agent overrides - all fields optional)
+export const GuardrailsProfileSchema = z.object({
+	max_tool_calls: z.number().min(10).max(1000).optional(),
+	max_duration_minutes: z.number().min(1).max(120).optional(),
+	max_repetitions: z.number().min(3).max(50).optional(),
+	max_consecutive_errors: z.number().min(2).max(20).optional(),
+	warning_threshold: z.number().min(0.1).max(0.9).optional(),
+});
+
+export type GuardrailsProfile = z.infer<typeof GuardrailsProfileSchema>;
+
 // Guardrails configuration
 export const GuardrailsConfigSchema = z.object({
 	enabled: z.boolean().default(true),
@@ -58,9 +69,29 @@ export const GuardrailsConfigSchema = z.object({
 	max_repetitions: z.number().min(3).max(50).default(10),
 	max_consecutive_errors: z.number().min(2).max(20).default(5),
 	warning_threshold: z.number().min(0.1).max(0.9).default(0.5),
+	profiles: z.record(z.string(), GuardrailsProfileSchema).optional(),
 });
 
 export type GuardrailsConfig = z.infer<typeof GuardrailsConfigSchema>;
+
+/**
+ * Resolve guardrails configuration for a specific agent.
+ * Merges the base config with any per-agent profile overrides.
+ *
+ * @param base - The base guardrails configuration
+ * @param agentName - Optional agent name to look up profile overrides
+ * @returns The effective guardrails configuration for the agent
+ */
+export function resolveGuardrailsConfig(
+	base: GuardrailsConfig,
+	agentName?: string,
+): GuardrailsConfig {
+	if (!agentName || !base.profiles?.[agentName]) {
+		return base;
+	}
+	const profile = base.profiles[agentName];
+	return { ...base, ...profile };
+}
 
 // Main plugin configuration
 export const PluginConfigSchema = z.object({

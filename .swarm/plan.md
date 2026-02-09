@@ -1,6 +1,6 @@
 # v5.0.0 — Verifiable Execution
 Swarm: mega
-Phase: 3 [PENDING] | Updated: 2026-02-09
+Phase: 4 [PENDING] | Updated: 2026-02-09
 
 ## Thesis
 Upgrade opencode-swarm from "workflow + prompts" to "workflow + verifiable execution" by making the plan machine-checkable and persisting evidence per task.
@@ -28,11 +28,11 @@ Upgrade opencode-swarm from "workflow + prompts" to "workflow + verifiable execu
 
 ---
 
-## Phase 3: Per-Agent Guardrail Profiles [PENDING]
+## Phase 3: Per-Agent Guardrail Profiles [COMPLETE]
 
-- [ ] 3.1: Extend GuardrailsConfigSchema with profiles [SMALL]
-- [ ] 3.2: Update guardrails.ts for per-agent limit resolution [SMALL]
-- [ ] 3.3: Tests for profile resolution and merge [SMALL]
+- [x] 3.1: Extend GuardrailsConfigSchema with profiles [SMALL]
+- [x] 3.2: Update guardrails.ts for per-agent limit resolution [SMALL]
+- [x] 3.3: Tests for profile resolution and merge [SMALL]
 
 ---
 

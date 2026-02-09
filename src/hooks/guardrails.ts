@@ -7,7 +7,10 @@
  * - Layer 2 (Hard Block @ 100%): Throws error in toolBefore to block further calls, injects STOP message
  */
 
-import type { GuardrailsConfig } from '../config/schema';
+import {
+	type GuardrailsConfig,
+	resolveGuardrailsConfig,
+} from '../config/schema';
 import { getAgentSession, startAgentSession, swarmState } from '../state';
 import { warn } from '../utils';
 
@@ -60,6 +63,9 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 				}
 			}
 
+			// Resolve per-agent config using profile overrides
+			const agentConfig = resolveGuardrailsConfig(config, session.agentName);
+
 			// Check if hard limit was already hit
 			if (session.hardLimitHit) {
 				throw new Error(
@@ -105,28 +111,28 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 			const elapsedMinutes = (Date.now() - session.startTime) / 60000;
 
 			// Check HARD limits (any one triggers circuit breaker)
-			if (session.toolCallCount >= config.max_tool_calls) {
+			if (session.toolCallCount >= agentConfig.max_tool_calls) {
 				session.hardLimitHit = true;
 				throw new Error(
-					`🛑 CIRCUIT BREAKER: Tool call limit reached (${session.toolCallCount}/${config.max_tool_calls}). Stop making tool calls and return your progress summary.`,
+					`🛑 CIRCUIT BREAKER: Tool call limit reached (${session.toolCallCount}/${agentConfig.max_tool_calls}). Stop making tool calls and return your progress summary.`,
 				);
 			}
 
-			if (elapsedMinutes >= config.max_duration_minutes) {
+			if (elapsedMinutes >= agentConfig.max_duration_minutes) {
 				session.hardLimitHit = true;
 				throw new Error(
 					`🛑 CIRCUIT BREAKER: Duration limit reached (${Math.floor(elapsedMinutes)} min). Stop making tool calls and return your progress summary.`,
 				);
 			}
 
-			if (repetitionCount >= config.max_repetitions) {
+			if (repetitionCount >= agentConfig.max_repetitions) {
 				session.hardLimitHit = true;
 				throw new Error(
 					`🛑 CIRCUIT BREAKER: Repetition detected (same call ${repetitionCount} times). Stop making tool calls and return your progress summary.`,
 				);
 			}
 
-			if (session.consecutiveErrors >= config.max_consecutive_errors) {
+			if (session.consecutiveErrors >= agentConfig.max_consecutive_errors) {
 				session.hardLimitHit = true;
 				throw new Error(
 					`🛑 CIRCUIT BREAKER: Too many consecutive errors (${session.consecutiveErrors}). Stop making tool calls and return your progress summary.`,
@@ -137,15 +143,16 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 			if (!session.warningIssued) {
 				const toolWarning =
 					session.toolCallCount >=
-					config.max_tool_calls * config.warning_threshold;
+					agentConfig.max_tool_calls * agentConfig.warning_threshold;
 				const durationWarning =
 					elapsedMinutes >=
-					config.max_duration_minutes * config.warning_threshold;
+					agentConfig.max_duration_minutes * agentConfig.warning_threshold;
 				const repetitionWarning =
-					repetitionCount >= config.max_repetitions * config.warning_threshold;
+					repetitionCount >=
+					agentConfig.max_repetitions * agentConfig.warning_threshold;
 				const errorWarning =
 					session.consecutiveErrors >=
-					config.max_consecutive_errors * config.warning_threshold;
+					agentConfig.max_consecutive_errors * agentConfig.warning_threshold;
 
 				if (
 					toolWarning ||

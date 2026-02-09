@@ -36,6 +36,14 @@ export declare const EvidenceConfigSchema: z.ZodObject<{
     auto_archive: z.ZodDefault<z.ZodBoolean>;
 }, z.core.$strip>;
 export type EvidenceConfig = z.infer<typeof EvidenceConfigSchema>;
+export declare const GuardrailsProfileSchema: z.ZodObject<{
+    max_tool_calls: z.ZodOptional<z.ZodNumber>;
+    max_duration_minutes: z.ZodOptional<z.ZodNumber>;
+    max_repetitions: z.ZodOptional<z.ZodNumber>;
+    max_consecutive_errors: z.ZodOptional<z.ZodNumber>;
+    warning_threshold: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strip>;
+export type GuardrailsProfile = z.infer<typeof GuardrailsProfileSchema>;
 export declare const GuardrailsConfigSchema: z.ZodObject<{
     enabled: z.ZodDefault<z.ZodBoolean>;
     max_tool_calls: z.ZodDefault<z.ZodNumber>;
@@ -43,8 +51,24 @@ export declare const GuardrailsConfigSchema: z.ZodObject<{
     max_repetitions: z.ZodDefault<z.ZodNumber>;
     max_consecutive_errors: z.ZodDefault<z.ZodNumber>;
     warning_threshold: z.ZodDefault<z.ZodNumber>;
+    profiles: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
+        max_tool_calls: z.ZodOptional<z.ZodNumber>;
+        max_duration_minutes: z.ZodOptional<z.ZodNumber>;
+        max_repetitions: z.ZodOptional<z.ZodNumber>;
+        max_consecutive_errors: z.ZodOptional<z.ZodNumber>;
+        warning_threshold: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>>;
 }, z.core.$strip>;
 export type GuardrailsConfig = z.infer<typeof GuardrailsConfigSchema>;
+/**
+ * Resolve guardrails configuration for a specific agent.
+ * Merges the base config with any per-agent profile overrides.
+ *
+ * @param base - The base guardrails configuration
+ * @param agentName - Optional agent name to look up profile overrides
+ * @returns The effective guardrails configuration for the agent
+ */
+export declare function resolveGuardrailsConfig(base: GuardrailsConfig, agentName?: string): GuardrailsConfig;
 export declare const PluginConfigSchema: z.ZodObject<{
     agents: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
         model: z.ZodOptional<z.ZodString>;
@@ -82,6 +106,13 @@ export declare const PluginConfigSchema: z.ZodObject<{
         max_repetitions: z.ZodDefault<z.ZodNumber>;
         max_consecutive_errors: z.ZodDefault<z.ZodNumber>;
         warning_threshold: z.ZodDefault<z.ZodNumber>;
+        profiles: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
+            max_tool_calls: z.ZodOptional<z.ZodNumber>;
+            max_duration_minutes: z.ZodOptional<z.ZodNumber>;
+            max_repetitions: z.ZodOptional<z.ZodNumber>;
+            max_consecutive_errors: z.ZodOptional<z.ZodNumber>;
+            warning_threshold: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>>;
     }, z.core.$strip>>;
     evidence: z.ZodOptional<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;

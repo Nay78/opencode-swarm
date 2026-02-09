@@ -13615,14 +13615,29 @@ var EvidenceConfigSchema = exports_external.object({
   max_bundles: exports_external.number().min(10).max(1e4).default(1000),
   auto_archive: exports_external.boolean().default(false)
 });
+var GuardrailsProfileSchema = exports_external.object({
+  max_tool_calls: exports_external.number().min(10).max(1000).optional(),
+  max_duration_minutes: exports_external.number().min(1).max(120).optional(),
+  max_repetitions: exports_external.number().min(3).max(50).optional(),
+  max_consecutive_errors: exports_external.number().min(2).max(20).optional(),
+  warning_threshold: exports_external.number().min(0.1).max(0.9).optional()
+});
 var GuardrailsConfigSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   max_tool_calls: exports_external.number().min(10).max(1000).default(200),
   max_duration_minutes: exports_external.number().min(1).max(120).default(30),
   max_repetitions: exports_external.number().min(3).max(50).default(10),
   max_consecutive_errors: exports_external.number().min(2).max(20).default(5),
-  warning_threshold: exports_external.number().min(0.1).max(0.9).default(0.5)
+  warning_threshold: exports_external.number().min(0.1).max(0.9).default(0.5),
+  profiles: exports_external.record(exports_external.string(), GuardrailsProfileSchema).optional()
 });
+function resolveGuardrailsConfig(base, agentName) {
+  if (!agentName || !base.profiles?.[agentName]) {
+    return base;
+  }
+  const profile = base.profiles[agentName];
+  return { ...base, ...profile };
+}
 var PluginConfigSchema = exports_external.object({
   agents: exports_external.record(exports_external.string(), AgentOverrideConfigSchema).optional(),
   swarms: exports_external.record(exports_external.string(), SwarmConfigSchema).optional(),
@@ -16175,6 +16190,7 @@ function createGuardrailsHooks(config2) {
           return;
         }
       }
+      const agentConfig = resolveGuardrailsConfig(config2, session.agentName);
       if (session.hardLimitHit) {
         throw new Error("\uD83D\uDED1 CIRCUIT BREAKER: Agent blocked. Hard limit was previously triggered. Stop making tool calls and return your progress summary.");
       }
@@ -16201,27 +16217,27 @@ function createGuardrailsHooks(config2) {
         }
       }
       const elapsedMinutes = (Date.now() - session.startTime) / 60000;
-      if (session.toolCallCount >= config2.max_tool_calls) {
+      if (session.toolCallCount >= agentConfig.max_tool_calls) {
         session.hardLimitHit = true;
-        throw new Error(`\uD83D\uDED1 CIRCUIT BREAKER: Tool call limit reached (${session.toolCallCount}/${config2.max_tool_calls}). Stop making tool calls and return your progress summary.`);
+        throw new Error(`\uD83D\uDED1 CIRCUIT BREAKER: Tool call limit reached (${session.toolCallCount}/${agentConfig.max_tool_calls}). Stop making tool calls and return your progress summary.`);
       }
-      if (elapsedMinutes >= config2.max_duration_minutes) {
+      if (elapsedMinutes >= agentConfig.max_duration_minutes) {
         session.hardLimitHit = true;
         throw new Error(`\uD83D\uDED1 CIRCUIT BREAKER: Duration limit reached (${Math.floor(elapsedMinutes)} min). Stop making tool calls and return your progress summary.`);
       }
-      if (repetitionCount >= config2.max_repetitions) {
+      if (repetitionCount >= agentConfig.max_repetitions) {
         session.hardLimitHit = true;
         throw new Error(`\uD83D\uDED1 CIRCUIT BREAKER: Repetition detected (same call ${repetitionCount} times). Stop making tool calls and return your progress summary.`);
       }
-      if (session.consecutiveErrors >= config2.max_consecutive_errors) {
+      if (session.consecutiveErrors >= agentConfig.max_consecutive_errors) {
         session.hardLimitHit = true;
         throw new Error(`\uD83D\uDED1 CIRCUIT BREAKER: Too many consecutive errors (${session.consecutiveErrors}). Stop making tool calls and return your progress summary.`);
       }
       if (!session.warningIssued) {
-        const toolWarning = session.toolCallCount >= config2.max_tool_calls * config2.warning_threshold;
-        const durationWarning = elapsedMinutes >= config2.max_duration_minutes * config2.warning_threshold;
-        const repetitionWarning = repetitionCount >= config2.max_repetitions * config2.warning_threshold;
-        const errorWarning = session.consecutiveErrors >= config2.max_consecutive_errors * config2.warning_threshold;
+        const toolWarning = session.toolCallCount >= agentConfig.max_tool_calls * agentConfig.warning_threshold;
+        const durationWarning = elapsedMinutes >= agentConfig.max_duration_minutes * agentConfig.warning_threshold;
+        const repetitionWarning = repetitionCount >= agentConfig.max_repetitions * agentConfig.warning_threshold;
+        const errorWarning = session.consecutiveErrors >= agentConfig.max_consecutive_errors * agentConfig.warning_threshold;
         if (toolWarning || durationWarning || repetitionWarning || errorWarning) {
           session.warningIssued = true;
         }

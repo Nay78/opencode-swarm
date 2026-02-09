@@ -3,17 +3,18 @@ import { createGuardrailsHooks, hashArgs } from '../../../src/hooks/guardrails';
 import { resetSwarmState, swarmState, startAgentSession, getAgentSession } from '../../../src/state';
 import type { GuardrailsConfig } from '../../../src/config/schema';
 
-function defaultConfig(overrides?: Partial<GuardrailsConfig>): GuardrailsConfig {
-	return {
-		enabled: true,
-		max_tool_calls: 200,
-		max_duration_minutes: 30,
-		max_repetitions: 10,
-		max_consecutive_errors: 5,
-		warning_threshold: 0.5,
-		...overrides,
-	};
-}
+	function defaultConfig(overrides?: Partial<GuardrailsConfig>): GuardrailsConfig {
+		return {
+			enabled: true,
+			max_tool_calls: 200,
+			max_duration_minutes: 30,
+			max_repetitions: 10,
+			max_consecutive_errors: 5,
+			warning_threshold: 0.5,
+			profiles: undefined,
+			...overrides,
+		};
+	}
 
 function makeInput(sessionID = 'test-session', tool = 'read', callID = 'call-1') {
 	return { tool, sessionID, callID };
@@ -451,6 +452,232 @@ describe('guardrails circuit breaker', () => {
 
 			const session = getAgentSession('test-session');
 			expect(session?.recentToolCalls.length).toBe(20);
+		});
+	});
+
+	describe('per-agent profiles', () => {
+		it('agent with profile gets higher tool call limit', async () => {
+			const config = defaultConfig({
+				max_tool_calls: 10,
+				profiles: {
+					coder: { max_tool_calls: 20 },
+				},
+			});
+			const hooks = createGuardrailsHooks(config);
+
+			// Create session with 'coder' agent
+			startAgentSession('coder-session', 'coder');
+
+			// Make 10 calls - should NOT throw (coder limit is 20)
+			for (let i = 0; i < 10; i++) {
+				await hooks.toolBefore(
+					makeInput('coder-session', `tool-${i}`, `call-${i}`),
+					makeOutput({ arg: i }),
+				);
+			}
+			// No error thrown - coder's limit of 20 not reached
+
+			// But a default agent session would throw at 10
+			startAgentSession('default-session', 'explorer');
+			for (let i = 0; i < 9; i++) {
+				await hooks.toolBefore(
+					makeInput('default-session', `tool-${i}`, `call-d-${i}`),
+					makeOutput({ arg: i }),
+				);
+			}
+			// 10th call should throw for explorer (base limit is 10)
+			await expect(
+				hooks.toolBefore(
+					makeInput('default-session', 'tool-10', 'call-d-10'),
+					makeOutput({ arg: 10 }),
+				),
+			).rejects.toThrow('CIRCUIT BREAKER');
+		});
+
+		it('agent without profile uses base config limits', async () => {
+			const config = defaultConfig({
+				max_tool_calls: 5,
+				profiles: {
+					coder: { max_tool_calls: 100 }, // Coder gets high limit
+				},
+			});
+			const hooks = createGuardrailsHooks(config);
+
+			// Create session with 'explorer' agent (no profile)
+			startAgentSession('explorer-session', 'explorer');
+
+			// Make 4 calls - should be fine
+			for (let i = 0; i < 4; i++) {
+				await hooks.toolBefore(
+					makeInput('explorer-session', `tool-${i}`, `call-${i}`),
+					makeOutput({ arg: i }),
+				);
+			}
+
+			// 5th call should throw (base limit is 5, explorer has no profile)
+			await expect(
+				hooks.toolBefore(
+					makeInput('explorer-session', 'tool-5', 'call-5'),
+					makeOutput({ arg: 5 }),
+				),
+			).rejects.toThrow('CIRCUIT BREAKER');
+		});
+
+		it('unknown agent (auto-created session) uses base config', async () => {
+			const config = defaultConfig({
+				max_tool_calls: 5,
+				profiles: {
+					coder: { max_tool_calls: 100 },
+					explorer: { max_tool_calls: 50 },
+				},
+			});
+			const hooks = createGuardrailsHooks(config);
+
+			// Don't create a session - let toolBefore auto-create it as 'unknown'
+			// The session gets auto-created with agentName='unknown'
+
+			// Make 4 calls - should be fine
+			for (let i = 0; i < 4; i++) {
+				await hooks.toolBefore(
+					makeInput('unknown-session', `tool-${i}`, `call-${i}`),
+					makeOutput({ arg: i }),
+				);
+			}
+
+			// 5th call should throw (unknown agent has no profile, uses base limit of 5)
+			await expect(
+				hooks.toolBefore(
+					makeInput('unknown-session', 'tool-5', 'call-5'),
+					makeOutput({ arg: 5 }),
+				),
+			).rejects.toThrow('CIRCUIT BREAKER');
+		});
+
+		it('agent with profile gets different warning threshold', async () => {
+			const config = defaultConfig({
+				max_tool_calls: 100,
+				warning_threshold: 0.5, // Base: warn at 50 calls
+				profiles: {
+					coder: { warning_threshold: 0.8 }, // Coder: warn at 80 calls
+				},
+			});
+			const hooks = createGuardrailsHooks(config);
+
+			// Coder session - should NOT warn at 50 calls (threshold is 0.8, so 80)
+			startAgentSession('coder-session', 'coder');
+			for (let i = 0; i < 50; i++) {
+				await hooks.toolBefore(
+					makeInput('coder-session', `tool-${i}`, `call-c-${i}`),
+					makeOutput({ arg: i }),
+				);
+			}
+			const coderSession = getAgentSession('coder-session');
+			expect(coderSession?.warningIssued).toBe(false);
+
+			// Explorer session - SHOULD warn at 50 calls (uses base threshold of 0.5)
+			startAgentSession('explorer-session', 'explorer');
+			for (let i = 0; i < 50; i++) {
+				await hooks.toolBefore(
+					makeInput('explorer-session', `tool-${i}`, `call-e-${i}`),
+					makeOutput({ arg: i }),
+				);
+			}
+			const explorerSession = getAgentSession('explorer-session');
+			expect(explorerSession?.warningIssued).toBe(true);
+		});
+
+		it('profile with max_consecutive_errors override works', async () => {
+			const config = defaultConfig({
+				max_consecutive_errors: 5,
+				profiles: {
+					tester: { max_consecutive_errors: 2 }, // Tester fails faster
+				},
+			});
+			const hooks = createGuardrailsHooks(config);
+
+			// Create tester session with 2 consecutive errors
+			startAgentSession('tester-session', 'tester');
+			const testerSession = getAgentSession('tester-session');
+			if (testerSession) {
+				testerSession.consecutiveErrors = 2;
+			}
+
+			// Next tool call should throw (tester limit is 2)
+			await expect(
+				hooks.toolBefore(
+					makeInput('tester-session', 'tool-1', 'call-1'),
+					makeOutput({ arg: 1 }),
+				),
+			).rejects.toThrow('consecutive errors');
+
+			// But explorer session with 2 errors should be fine
+			startAgentSession('explorer-session', 'explorer');
+			const explorerSession = getAgentSession('explorer-session');
+			if (explorerSession) {
+				explorerSession.consecutiveErrors = 2;
+			}
+
+			// Next tool call should NOT throw (explorer limit is 5, uses base config)
+			await hooks.toolBefore(
+				makeInput('explorer-session', 'tool-2', 'call-2'),
+				makeOutput({ arg: 2 }),
+			);
+		});
+
+		it('profile with max_repetitions override works', async () => {
+			const config = defaultConfig({
+				max_repetitions: 10,
+				profiles: {
+					coder: { max_repetitions: 3 }, // Coder blocks repetitions faster
+				},
+			});
+			const args = { filePath: '/test.ts' };
+
+			// Coder session - should throw at 3rd call (repetitionCount >= 3)
+			let hooks = createGuardrailsHooks(config);
+			startAgentSession('coder-session', 'coder');
+			// First 2 calls should be fine
+			await hooks.toolBefore(
+				makeInput('coder-session', 'read', 'call-1'),
+				makeOutput(args),
+			);
+			await hooks.toolBefore(
+				makeInput('coder-session', 'read', 'call-2'),
+				makeOutput(args),
+			);
+
+			// 3rd identical call should throw for coder (repetitionCount = 3, limit is 3)
+			await expect(
+				hooks.toolBefore(
+					makeInput('coder-session', 'read', 'call-3'),
+					makeOutput(args),
+				),
+			).rejects.toThrow('Repetition detected');
+
+			// Reset state and create new hooks for explorer session
+			resetSwarmState();
+			hooks = createGuardrailsHooks(config);
+
+			// But explorer session can have more repetitions (uses base limit of 10)
+			startAgentSession('explorer-session', 'explorer');
+			for (let i = 0; i < 9; i++) {
+				await hooks.toolBefore(
+					makeInput('explorer-session', 'read', `call-e-${i}`),
+					makeOutput(args),
+				);
+			}
+			// 10th call should be fine (limit is 10, repetitionCount = 10 >= 10... wait)
+			// Actually, 10th call would have repetitionCount = 10, which equals limit, so it throws
+			// So we should test that 9th call is fine and 10th call throws
+			// But we just made 9 calls (0-8), so let's add the 10th and verify it throws
+
+			// 10th call should throw (repetitionCount = 10 >= 10)
+			await expect(
+				hooks.toolBefore(
+					makeInput('explorer-session', 'read', 'call-e-9'),
+					makeOutput(args),
+				),
+			).rejects.toThrow('Repetition detected');
 		});
 	});
 });
