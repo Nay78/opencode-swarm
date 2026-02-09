@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.0] - 2026-02-09
+### Added
+- **Canonical plan schema** — Machine-readable `plan.json` with Zod-validated `PlanSchema`, `TaskSchema`, and `PhaseSchema`. Structured task status (`pending`, `in_progress`, `completed`, `blocked`), phase-level status tracking, and schema versioning (`schema_version: "1.0"`).
+- **Plan migration** — Automatic migration from legacy `plan.md` markdown format to structured `plan.json`. Preserves task status, dependencies, and phase structure. Idempotent and backward-compatible.
+- **Evidence bundles** — Per-task execution evidence persisted to `.swarm/evidence/{taskId}/`. Five discriminated evidence types via Zod: `review` (with risk/issues), `test` (pass/fail counts), `diff` (files/additions/deletions), `approval`, and `note`. Atomic writes via temp+rename pattern.
+- **Evidence retention** — Configurable retention policy: `max_age_days` (default: 90), `max_bundles` (default: 1000), `auto_archive` flag. `archiveEvidence()` function with maxBundles enforcement.
+- **Evidence config** — `EvidenceConfigSchema` added to `PluginConfigSchema` with `enabled`, `max_age_days`, `max_bundles`, `auto_archive` fields.
+- **`/swarm evidence [task]`** — View evidence bundles for a specific task or list all tasks with evidence.
+- **`/swarm archive [--dry-run]`** — Archive old evidence bundles with dry-run support for previewing changes.
+- **Per-agent guardrail profiles** — `GuardrailsProfileSchema` with optional override fields. `profiles` field in `GuardrailsConfigSchema` maps agent names to partial guardrail overrides. `resolveGuardrailsConfig()` pure merge function.
+- **Context injection budget** — `max_injection_tokens` field in `ContextBudgetConfigSchema` (range: 100–50,000, default: 4,000). Budget-aware `tryInject()` in system-enhancer with priority-ordered injection: phase → task → decisions → agent context. Lower-priority items dropped when budget exhausted.
+- **Enhanced `/swarm agents`** — Agent count summary line, `⚡ custom limits` indicator for agents with guardrail profiles, and Guardrail Profiles summary section.
+- **Packaging smoke tests** — 8 CI-safe tests validating `dist/` output: entry point existence, export verification, declaration files, and bundle integrity.
+- **Evidence completeness check** in `/swarm diagnose` — Reports tasks missing evidence.
+
+### Changed
+- System enhancer (`src/hooks/system-enhancer.ts`) refactored to use budget-aware `tryInject()` helper instead of direct `output.system.push()`.
+- Plan-related slash commands (`plan`, `history`, `diagnose`, `export`) updated to use structured plan manager.
+- Guardrails `toolBefore` hook now resolves per-agent config via `resolveGuardrailsConfig(config, session.agentName)`.
+- `/swarm agents` command now loads plugin config and passes guardrails data for profile display.
+- Extractors updated for plan-aware hooks.
+
+### Tests
+- **208 new tests** across 9 new test files:
+  - Plan schema and manager (80 tests)
+  - Evidence schema (23 tests)
+  - Evidence manager (25 tests)
+  - Archive command (8 tests)
+  - Evidence config (8 tests)
+  - Guardrail profiles (35 tests)
+  - Enhanced agent view (15 tests)
+  - Packaging smoke tests (8 tests)
+  - Injection budget (7 tests)
+- **876 total tests** across 39 files (up from 668 in v4.6.0).
+
 ## [4.6.0] - 2026-02-09
 ### Added
 - **Agent guardrails circuit breaker** — Two-layer protection against runaway subagents. Soft warning at 50% of configurable limits, hard block at 100%. Detection signals: tool call count, wall-clock duration, consecutive repetition (same tool+args hash), and consecutive errors (null/undefined output).

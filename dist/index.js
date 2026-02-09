@@ -13607,7 +13607,8 @@ var ContextBudgetConfigSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
   warn_threshold: exports_external.number().min(0).max(1).default(0.7),
   critical_threshold: exports_external.number().min(0).max(1).default(0.9),
-  model_limits: exports_external.record(exports_external.string(), exports_external.number().min(1000)).default({ default: 128000 })
+  model_limits: exports_external.record(exports_external.string(), exports_external.number().min(1000)).default({ default: 128000 }),
+  max_injection_tokens: exports_external.number().min(100).max(50000).default(4000)
 });
 var EvidenceConfigSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
@@ -16394,41 +16395,51 @@ function createSystemEnhancerHook(config2, directory) {
   return {
     "experimental.chat.system.transform": safeHook(async (_input, output) => {
       try {
+        let tryInject = function(text) {
+          const tokens = estimateTokens(text);
+          if (injectedTokens + tokens > maxInjectionTokens) {
+            return;
+          }
+          output.system.push(text);
+          injectedTokens += tokens;
+        };
+        const maxInjectionTokens = config2.context_budget?.max_injection_tokens ?? Number.POSITIVE_INFINITY;
+        let injectedTokens = 0;
         const contextContent = await readSwarmFileAsync(directory, "context.md");
         const plan = await loadPlan(directory);
         if (plan && plan.migration_status !== "migration_failed") {
           const currentPhase = extractCurrentPhaseFromPlan(plan);
           if (currentPhase) {
-            output.system.push(`[SWARM CONTEXT] Current phase: ${currentPhase}`);
+            tryInject(`[SWARM CONTEXT] Current phase: ${currentPhase}`);
           }
           const currentTask = extractCurrentTaskFromPlan(plan);
           if (currentTask) {
-            output.system.push(`[SWARM CONTEXT] Current task: ${currentTask}`);
+            tryInject(`[SWARM CONTEXT] Current task: ${currentTask}`);
           }
         } else {
           const planContent = await readSwarmFileAsync(directory, "plan.md");
           if (planContent) {
             const currentPhase = extractCurrentPhase(planContent);
             if (currentPhase) {
-              output.system.push(`[SWARM CONTEXT] Current phase: ${currentPhase}`);
+              tryInject(`[SWARM CONTEXT] Current phase: ${currentPhase}`);
             }
             const currentTask = extractCurrentTask(planContent);
             if (currentTask) {
-              output.system.push(`[SWARM CONTEXT] Current task: ${currentTask}`);
+              tryInject(`[SWARM CONTEXT] Current task: ${currentTask}`);
             }
           }
         }
         if (contextContent) {
           const decisions = extractDecisions(contextContent, 200);
           if (decisions) {
-            output.system.push(`[SWARM CONTEXT] Key decisions: ${decisions}`);
+            tryInject(`[SWARM CONTEXT] Key decisions: ${decisions}`);
           }
           if (config2.hooks?.agent_activity !== false && _input.sessionID) {
             const activeAgent = swarmState.activeAgent.get(_input.sessionID);
             if (activeAgent) {
               const agentContext = extractAgentContext(contextContent, activeAgent, config2.hooks?.agent_awareness_max_chars ?? 300);
               if (agentContext) {
-                output.system.push(`[SWARM AGENT CONTEXT] ${agentContext}`);
+                tryInject(`[SWARM AGENT CONTEXT] ${agentContext}`);
               }
             }
           }

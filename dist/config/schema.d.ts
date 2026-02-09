@@ -27,6 +27,7 @@ export declare const ContextBudgetConfigSchema: z.ZodObject<{
     warn_threshold: z.ZodDefault<z.ZodNumber>;
     critical_threshold: z.ZodDefault<z.ZodNumber>;
     model_limits: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodNumber>>;
+    max_injection_tokens: z.ZodDefault<z.ZodNumber>;
 }, z.core.$strip>;
 export type ContextBudgetConfig = z.infer<typeof ContextBudgetConfigSchema>;
 export declare const EvidenceConfigSchema: z.ZodObject<{
@@ -98,6 +99,7 @@ export declare const PluginConfigSchema: z.ZodObject<{
         warn_threshold: z.ZodDefault<z.ZodNumber>;
         critical_threshold: z.ZodDefault<z.ZodNumber>;
         model_limits: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodNumber>>;
+        max_injection_tokens: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strip>>;
     guardrails: z.ZodOptional<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;

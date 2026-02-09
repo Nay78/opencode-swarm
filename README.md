@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.6.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-5.0.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   <img src="https://img.shields.io/badge/opencode-plugin-purple" alt="OpenCode Plugin">
   <img src="https://img.shields.io/badge/agents-8-orange" alt="Agents">
-  <img src="https://img.shields.io/badge/tests-668-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-876-brightgreen" alt="Tests">
 </p>
 
 <h1 align="center">🐝 OpenCode Swarm</h1>
@@ -168,8 +168,11 @@ Other frameworks lose everything when the session ends. Swarm doesn't.
 
 ```
 .swarm/
-├── plan.md          # Your project roadmap
+├── plan.md          # Your project roadmap (+ plan.json)
 ├── context.md       # Everything a new Architect needs
+├── evidence/        # Per-task execution evidence
+│   ├── 1.1/         # Evidence for task 1.1
+│   └── 2.3/         # Evidence for task 2.3
 └── history/
     ├── phase-1.md   # What was done, what was learned
     └── phase-2.md
@@ -331,6 +334,15 @@ bunx opencode-swarm uninstall --clean
 
 ## What's New
 
+### v5.0.0 — Verifiable Execution
+- **Canonical plan schema** — Machine-readable `plan.json` with Zod-validated `PlanSchema`/`TaskSchema`/`PhaseSchema`. Automatic migration from legacy `plan.md` format. Structured status tracking (`pending`, `in_progress`, `completed`, `blocked`).
+- **Evidence bundles** — Per-task execution evidence persisted to `.swarm/evidence/`. Five evidence types: `review`, `test`, `diff`, `approval`, `note`. Sanitized task IDs, atomic writes, configurable size limits. `/swarm evidence` to view, `/swarm archive` to manage retention.
+- **Per-agent guardrail profiles** — Override guardrail limits for individual agents via `guardrails.profiles`. `resolveGuardrailsConfig()` merges base + profile with per-agent specificity.
+- **Context injection budget** — `max_injection_tokens` config controls how much context is injected into system prompts. Priority-ordered: phase → task → decisions → agent context. Lower-priority items dropped when budget exhausted.
+- **Enhanced `/swarm agents`** — Agent count summary, `⚡ custom limits` indicator for profiled agents, guardrail profiles section.
+- **Packaging smoke tests** — CI-safe `dist/` validation (8 tests).
+- **208 new tests** — 876 total tests across 39 files (up from 668 in v4.6.0).
+
 ### v4.6.0 — Agent Guardrails
 - **Circuit breaker** — Two-layer protection against runaway agents. Soft warning at 50% of limits, hard block at 100%. Prevents infinite loops and runaway API costs.
 - **Detection signals** — Tool call count, wall-clock time, consecutive repetition, and consecutive error tracking per agent session.
@@ -408,6 +420,8 @@ All features are opt-in via configuration. See [Installation Guide](docs/install
 | `/swarm diagnose` | Health check for .swarm/ files and config |
 | `/swarm export` | Export plan and context as portable JSON |
 | `/swarm reset --confirm` | Clear swarm state files (with safety gate) |
+| `/swarm evidence [task]` | View evidence bundles for a task or all tasks |
+| `/swarm archive [--dry-run]` | Archive old evidence bundles with retention policy |
 
 ---
 
@@ -476,6 +490,24 @@ Guardrails are **enabled by default**. Customize in your swarm config:
 }
 ```
 
+### Per-Agent Profiles
+
+Override limits for specific agents that need more (or less) room:
+
+```jsonc
+{
+  "guardrails": {
+    "max_tool_calls": 200,
+    "profiles": {
+      "coder": { "max_tool_calls": 500, "max_duration_minutes": 60 },
+      "explorer": { "max_tool_calls": 50 }
+    }
+  }
+}
+```
+
+Profiles merge with base config — only specified fields are overridden.
+
 ### Disable Guardrails
 
 ```json
@@ -528,7 +560,7 @@ bun test
 bun test tests/unit/config/schema.test.ts
 ```
 
-668 unit tests across 30 files covering config, tools, agents, hooks, commands, state, and guardrails. Uses Bun's built-in test runner — zero additional test dependencies.
+876 unit tests across 39 files covering config, tools, agents, hooks, commands, state, guardrails, evidence, and plan schemas. Uses Bun's built-in test runner — zero additional test dependencies.
 
 ## Troubleshooting
 
