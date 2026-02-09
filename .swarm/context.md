@@ -1,5 +1,5 @@
 # Context
-Swarm: paid
+Swarm: mega
 
 ## Decisions
 - **Open-domain SME**: Single `sme` agent with NO hardcoded domain list. The architect determines what domain is needed and calls `@sme` with `DOMAIN: X`.
@@ -137,15 +137,16 @@ OUTPUT: VERDICT + RISK + ISSUES
 
 | Tool | Calls | Success | Failed | Avg Duration |
 |------|-------|---------|--------|--------------|
-| bash | 191 | 191 | 0 | 1248ms |
-| read | 134 | 134 | 0 | 4ms |
-| edit | 65 | 65 | 0 | 1682ms |
-| apply_patch | 53 | 53 | 0 | 3ms |
-| task | 36 | 36 | 0 | 67955ms |
-| todowrite | 18 | 18 | 0 | 3ms |
-| write | 14 | 14 | 0 | 1880ms |
-| glob | 4 | 4 | 0 | 19ms |
-| memory_set | 2 | 2 | 0 | 5ms |
-| invalid | 1 | 1 | 0 | 1ms |
-| grep | 1 | 1 | 0 | 12ms |
-| mystatus | 1 | 1 | 0 | 1888ms |
+| read | 72 | 72 | 0 | 8ms |
+| edit | 38 | 38 | 0 | 1385ms |
+| bash | 35 | 35 | 0 | 1248ms |
+| task | 13 | 13 | 0 | 75486ms |
+| todowrite | 11 | 11 | 0 | 2ms |
+| write | 4 | 4 | 0 | 1688ms |
+| memory_set | 3 | 3 | 0 | 1984ms |
+| glob | 1 | 1 | 0 | 48ms |
+| mystatus | 1 | 1 | 0 | 1828ms |
+| memory_replace | 1 | 1 | 0 | 3ms |
+| memory_list | 1 | 1 | 0 | 2ms |
+| grep | 1 | 1 | 0 | 2039ms |
+| apply_patch | 1 | 1 | 0 | 30ms |

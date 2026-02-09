@@ -34,6 +34,29 @@ export interface DelegationEntry {
     timestamp: number;
 }
 /**
+ * Represents per-session state for guardrail tracking
+ */
+export interface AgentSessionState {
+    /** Which agent this session belongs to */
+    agentName: string;
+    /** Date.now() when session started */
+    startTime: number;
+    /** Total tool calls in this session */
+    toolCallCount: number;
+    /** Consecutive errors (reset on success) */
+    consecutiveErrors: number;
+    /** Circular buffer of recent tool calls, max 20 entries */
+    recentToolCalls: Array<{
+        tool: string;
+        argsHash: number;
+        timestamp: number;
+    }>;
+    /** Whether a soft warning has been issued */
+    warningIssued: boolean;
+    /** Whether a hard limit has been triggered */
+    hardLimitHit: boolean;
+}
+/**
  * Singleton state object for sharing data across hooks
  */
 export declare const swarmState: {
@@ -47,8 +70,29 @@ export declare const swarmState: {
     delegationChains: Map<string, DelegationEntry[]>;
     /** Number of events since last flush */
     pendingEvents: number;
+    /** Per-session guardrail state — keyed by sessionID */
+    agentSessions: Map<string, AgentSessionState>;
 };
 /**
  * Reset all state to initial values - useful for testing
  */
 export declare function resetSwarmState(): void;
+/**
+ * Start a new agent session with initialized guardrail state.
+ * Also removes any stale sessions older than staleDurationMs.
+ * @param sessionId - The session identifier
+ * @param agentName - The agent associated with this session
+ * @param staleDurationMs - Age threshold for stale session eviction (default: 60 min)
+ */
+export declare function startAgentSession(sessionId: string, agentName: string, staleDurationMs?: number): void;
+/**
+ * End an agent session by removing it from the state.
+ * @param sessionId - The session identifier to remove
+ */
+export declare function endAgentSession(sessionId: string): void;
+/**
+ * Get an agent session state by session ID.
+ * @param sessionId - The session identifier
+ * @returns The AgentSessionState or undefined if not found
+ */
+export declare function getAgentSession(sessionId: string): AgentSessionState | undefined;

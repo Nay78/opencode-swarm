@@ -9,6 +9,7 @@ export {
 	extractIncompleteTasks,
 	extractPatterns,
 } from './extractors';
+export { createGuardrailsHooks } from './guardrails';
 export { createPipelineTrackerHook } from './pipeline-tracker';
 export { createSystemEnhancerHook } from './system-enhancer';
 export {

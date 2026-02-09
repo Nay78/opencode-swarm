@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.5.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.6.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   <img src="https://img.shields.io/badge/opencode-plugin-purple" alt="OpenCode Plugin">
   <img src="https://img.shields.io/badge/agents-8-orange" alt="Agents">
-  <img src="https://img.shields.io/badge/tests-622-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-668-brightgreen" alt="Tests">
 </p>
 
 <h1 align="center">🐝 OpenCode Swarm</h1>
@@ -331,6 +331,12 @@ bunx opencode-swarm uninstall --clean
 
 ## What's New
 
+### v4.6.0 — Agent Guardrails
+- **Circuit breaker** — Two-layer protection against runaway agents. Soft warning at 50% of limits, hard block at 100%. Prevents infinite loops and runaway API costs.
+- **Detection signals** — Tool call count, wall-clock time, consecutive repetition, and consecutive error tracking per agent session.
+- **Configurable limits** — All thresholds tunable via `guardrails` config: `max_tool_calls`, `max_duration_minutes`, `max_repetitions`, `max_consecutive_errors`, `warning_threshold`.
+- **46 new tests** — 668 total tests across 30 files.
+
 ### v4.5.0 — Tech Debt + New Commands
 - **Lint cleanup** — Replaced string concatenation with template literals, documented `as any` casts with biome-ignore comments.
 - **Code deduplication** — Extracted `stripSwarmPrefix()` utility to eliminate 3 duplicate prefix-stripping blocks.
@@ -433,6 +439,55 @@ Create `~/.config/opencode/opencode-swarm.json`:
 
 ---
 
+## Guardrails
+
+OpenCode Swarm includes a built-in circuit breaker that prevents subagents from running away — burning API credits in infinite loops, repeating the same tool call, or spinning for hours.
+
+### How It Works
+
+| Layer | Trigger | Action |
+|-------|---------|--------|
+| ⚠️ **Soft Warning** | 50% of any limit reached | Injects warning message into agent's chat stream |
+| 🛑 **Hard Block** | 100% of any limit reached | Blocks ALL further tool calls + injects stop message |
+
+### Detection Signals
+
+| Signal | Default Limit | Description |
+|--------|---------------|-------------|
+| Tool calls | 200 | Total tool invocations per agent session |
+| Duration | 30 min | Wall-clock time since delegation started |
+| Repetition | 10 | Same tool + args called consecutively |
+| Consecutive errors | 5 | Sequential null/undefined tool outputs |
+
+### Configuration
+
+Guardrails are **enabled by default**. Customize in your swarm config:
+
+```jsonc
+{
+  "guardrails": {
+    "enabled": true,              // default: true
+    "max_tool_calls": 200,        // range: 10–1000
+    "max_duration_minutes": 30,   // range: 1–120
+    "max_repetitions": 10,        // range: 3–50
+    "max_consecutive_errors": 5,  // range: 2–20
+    "warning_threshold": 0.5      // range: 0.1–0.9 (fraction of limit for soft warning)
+  }
+}
+```
+
+### Disable Guardrails
+
+```json
+{
+  "guardrails": {
+    "enabled": false
+  }
+}
+```
+
+---
+
 ## Comparison
 
 | Feature | OpenCode Swarm | AutoGen | CrewAI | LangGraph |
@@ -473,7 +528,7 @@ bun test
 bun test tests/unit/config/schema.test.ts
 ```
 
-622 unit tests across 29 files covering config, tools, agents, hooks, commands, and state. Uses Bun's built-in test runner — zero additional test dependencies.
+668 unit tests across 30 files covering config, tools, agents, hooks, commands, state, and guardrails. Uses Bun's built-in test runner — zero additional test dependencies.
 
 ## Troubleshooting
 

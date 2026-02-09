@@ -2,12 +2,14 @@ import type { Plugin } from '@opencode-ai/plugin';
 import { createAgents, getAgentConfigs } from './agents';
 import { createSwarmCommandHandler } from './commands';
 import { loadPluginConfig } from './config';
+import { GuardrailsConfigSchema } from './config/schema';
 import {
 	composeHandlers,
 	createAgentActivityHooks,
 	createCompactionCustomizerHook,
 	createContextBudgetHandler,
 	createDelegationTrackerHook,
+	createGuardrailsHooks,
 	createPipelineTrackerHook,
 	createSystemEnhancerHook,
 	safeHook,
@@ -39,6 +41,10 @@ const OpenCodeSwarm: Plugin = async (ctx) => {
 	);
 	const activityHooks = createAgentActivityHooks(config, ctx.directory);
 	const delegationHandler = createDelegationTrackerHook(config);
+	const guardrailsConfig = GuardrailsConfigSchema.parse(
+		config.guardrails ?? {},
+	);
+	const guardrailsHooks = createGuardrailsHooks(guardrailsConfig);
 
 	log('Plugin initialized', {
 		directory: ctx.directory,
@@ -54,6 +60,7 @@ const OpenCodeSwarm: Plugin = async (ctx) => {
 			commands: true,
 			agentActivity: config.hooks?.agent_activity !== false,
 			delegationTracker: config.hooks?.delegation_tracker === true,
+			guardrails: guardrailsConfig.enabled,
 		},
 	});
 
@@ -99,6 +106,7 @@ const OpenCodeSwarm: Plugin = async (ctx) => {
 			...[
 				pipelineHook['experimental.chat.messages.transform'],
 				contextBudgetHandler,
+				guardrailsHooks.messagesTransform,
 			].filter((fn): fn is NonNullable<typeof fn> => Boolean(fn)),
 			// biome-ignore lint/suspicious/noExplicitAny: Plugin API requires generic hook wrappers
 		) as any,
@@ -119,11 +127,20 @@ const OpenCodeSwarm: Plugin = async (ctx) => {
 		// biome-ignore lint/suspicious/noExplicitAny: Plugin API requires generic hook wrappers
 		'command.execute.before': safeHook(commandHandler) as any,
 
-		// Track tool usage
+		// Track tool usage + guardrails
 		// biome-ignore lint/suspicious/noExplicitAny: Plugin API requires generic hook wrappers
-		'tool.execute.before': safeHook(activityHooks.toolBefore) as any,
-		// biome-ignore lint/suspicious/noExplicitAny: Plugin API requires generic hook wrappers
-		'tool.execute.after': safeHook(activityHooks.toolAfter) as any,
+		'tool.execute.before': (async (input: any, output: any) => {
+			// Guardrails runs first WITHOUT safeHook — throws must propagate to block tools
+			await guardrailsHooks.toolBefore(input, output);
+			// Activity tracking runs second WITH safeHook — errors should not propagate
+			await safeHook(activityHooks.toolBefore)(input, output);
+			// biome-ignore lint/suspicious/noExplicitAny: Plugin API requires generic hook wrappers
+		}) as any,
+		'tool.execute.after': composeHandlers(
+			activityHooks.toolAfter,
+			guardrailsHooks.toolAfter,
+			// biome-ignore lint/suspicious/noExplicitAny: Plugin API requires generic hook wrappers
+		) as any,
 
 		// Track agent delegations and active agent
 		// biome-ignore lint/suspicious/noExplicitAny: Plugin API requires generic hook wrappers

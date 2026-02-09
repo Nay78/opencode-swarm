@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.6.0] - 2026-02-09
+### Added
+- **Agent guardrails circuit breaker** — Two-layer protection against runaway subagents. Soft warning at 50% of configurable limits, hard block at 100%. Detection signals: tool call count, wall-clock duration, consecutive repetition (same tool+args hash), and consecutive errors (null/undefined output).
+- **`GuardrailsConfig` schema** — Zod-validated configuration with 6 tunable fields (`enabled`, `max_tool_calls`, `max_duration_minutes`, `max_repetitions`, `max_consecutive_errors`, `warning_threshold`), all with sensible defaults and range validation.
+- **Per-session agent state tracking** — `AgentSessionState` interface with `startAgentSession()`, `endAgentSession()`, `getAgentSession()` in `src/state.ts`. Includes stale session eviction (2-hour TTL).
+- **`hashArgs()` utility** — Deterministic argument hashing for repetition detection, exported for testing.
+
+### Changed
+- Plugin entry (`src/index.ts`) now registers guardrails hooks (`tool.execute.before`, `tool.execute.after`, `experimental.chat.messages.transform`) composed with existing handlers via `composeHandlers()`.
+- `guardrailsHooks.toolBefore` runs **without** `safeHook` wrapper so thrown errors propagate to block tool execution at circuit-breaker limits.
+
+### Tests
+- **46 new tests** — Guardrails hooks (31 tests), agent session state (7 tests), guardrails config schema (8 tests).
+- **668 total tests** across 30 files (up from 622 in v4.5.0).
+
 ## [4.5.0] - 2026-02-07
 ### Fixed
 - Replaced string concatenation with template literals in hooks (`agent-activity.ts`, `system-enhancer.ts`).

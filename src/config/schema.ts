@@ -40,6 +40,18 @@ export const ContextBudgetConfigSchema = z.object({
 
 export type ContextBudgetConfig = z.infer<typeof ContextBudgetConfigSchema>;
 
+// Guardrails configuration
+export const GuardrailsConfigSchema = z.object({
+	enabled: z.boolean().default(true),
+	max_tool_calls: z.number().min(10).max(1000).default(200),
+	max_duration_minutes: z.number().min(1).max(120).default(30),
+	max_repetitions: z.number().min(3).max(50).default(10),
+	max_consecutive_errors: z.number().min(2).max(20).default(5),
+	warning_threshold: z.number().min(0.1).max(0.9).default(0.5),
+});
+
+export type GuardrailsConfig = z.infer<typeof GuardrailsConfigSchema>;
+
 // Main plugin configuration
 export const PluginConfigSchema = z.object({
 	// Legacy: Per-agent overrides (default swarm)
@@ -64,6 +76,9 @@ export const PluginConfigSchema = z.object({
 
 	// Context budget configuration
 	context_budget: ContextBudgetConfigSchema.optional(),
+
+	// Guardrails configuration
+	guardrails: GuardrailsConfigSchema.optional(),
 });
 
 export type PluginConfig = z.infer<typeof PluginConfigSchema>;

@@ -29,6 +29,15 @@ export declare const ContextBudgetConfigSchema: z.ZodObject<{
     model_limits: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodNumber>>;
 }, z.core.$strip>;
 export type ContextBudgetConfig = z.infer<typeof ContextBudgetConfigSchema>;
+export declare const GuardrailsConfigSchema: z.ZodObject<{
+    enabled: z.ZodDefault<z.ZodBoolean>;
+    max_tool_calls: z.ZodDefault<z.ZodNumber>;
+    max_duration_minutes: z.ZodDefault<z.ZodNumber>;
+    max_repetitions: z.ZodDefault<z.ZodNumber>;
+    max_consecutive_errors: z.ZodDefault<z.ZodNumber>;
+    warning_threshold: z.ZodDefault<z.ZodNumber>;
+}, z.core.$strip>;
+export type GuardrailsConfig = z.infer<typeof GuardrailsConfigSchema>;
 export declare const PluginConfigSchema: z.ZodObject<{
     agents: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
         model: z.ZodOptional<z.ZodString>;
@@ -58,6 +67,14 @@ export declare const PluginConfigSchema: z.ZodObject<{
         warn_threshold: z.ZodDefault<z.ZodNumber>;
         critical_threshold: z.ZodDefault<z.ZodNumber>;
         model_limits: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodNumber>>;
+    }, z.core.$strip>>;
+    guardrails: z.ZodOptional<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        max_tool_calls: z.ZodDefault<z.ZodNumber>;
+        max_duration_minutes: z.ZodDefault<z.ZodNumber>;
+        max_repetitions: z.ZodDefault<z.ZodNumber>;
+        max_consecutive_errors: z.ZodDefault<z.ZodNumber>;
+        warning_threshold: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
 export type PluginConfig = z.infer<typeof PluginConfigSchema>;

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { swarmState, resetSwarmState, ToolCallEntry, ToolAggregate, DelegationEntry } from '../../src/state';
+import { swarmState, resetSwarmState, ToolCallEntry, ToolAggregate, DelegationEntry, startAgentSession, endAgentSession, getAgentSession } from '../../src/state';
 
 describe('state module', () => {
 	beforeEach(() => {
@@ -332,7 +332,7 @@ describe('state module', () => {
 				callID: 'call-1',
 				startTime: Date.now()
 			});
-			
+
 			swarmState.toolAggregates.set('key2', {
 				tool: 'test-aggregate-tool',
 				count: 5,
@@ -340,56 +340,144 @@ describe('state module', () => {
 				failureCount: 1,
 				totalDuration: 1000
 			});
-			
+
 			swarmState.activeAgent.set('session-1', 'agent-1');
-			
+
 			swarmState.delegationChains.set('chain-1', [{
 				from: 'agent-from',
 				to: 'agent-to',
 				timestamp: Date.now()
 			}]);
-			
+
 			swarmState.pendingEvents = 10;
-			
+
 			// Clear activeToolCalls manually
 			swarmState.activeToolCalls.clear();
-			
+
 			// Verify other Maps are unaffected
 			expect(swarmState.activeToolCalls.size).toBe(0);
 			expect(swarmState.toolAggregates.size).toBe(1);
 			expect(swarmState.activeAgent.size).toBe(1);
 			expect(swarmState.delegationChains.size).toBe(1);
 			expect(swarmState.pendingEvents).toBe(10);
-			
+
 			// Clear toolAggregates manually
 			swarmState.toolAggregates.clear();
-			
+
 			// Verify other Maps are still unaffected
 			expect(swarmState.activeToolCalls.size).toBe(0);
 			expect(swarmState.toolAggregates.size).toBe(0);
 			expect(swarmState.activeAgent.size).toBe(1);
 			expect(swarmState.delegationChains.size).toBe(1);
 			expect(swarmState.pendingEvents).toBe(10);
-			
+
 			// Clear activeAgent manually
 			swarmState.activeAgent.clear();
-			
+
 			// Verify delegationChains is still unaffected
 			expect(swarmState.activeToolCalls.size).toBe(0);
 			expect(swarmState.toolAggregates.size).toBe(0);
 			expect(swarmState.activeAgent.size).toBe(0);
 			expect(swarmState.delegationChains.size).toBe(1);
 			expect(swarmState.pendingEvents).toBe(10);
-			
+
 			// Clear delegationChains manually
 			swarmState.delegationChains.clear();
-			
+
 			// Verify pendingEvents is still unaffected
 			expect(swarmState.activeToolCalls.size).toBe(0);
 			expect(swarmState.toolAggregates.size).toBe(0);
 			expect(swarmState.activeAgent.size).toBe(0);
 			expect(swarmState.delegationChains.size).toBe(0);
 			expect(swarmState.pendingEvents).toBe(10);
+		});
+	});
+
+	describe('agentSessions', () => {
+		it('agentSessions map exists on swarmState', () => {
+			expect(swarmState.agentSessions).toBeInstanceOf(Map);
+			expect(swarmState.agentSessions).toBeDefined();
+		});
+
+		it('startAgentSession creates entry', () => {
+			startAgentSession('s1', 'coder');
+			const session = getAgentSession('s1');
+
+			expect(session).toBeDefined();
+			expect(session?.agentName).toBe('coder');
+			expect(session?.toolCallCount).toBe(0);
+			expect(session?.consecutiveErrors).toBe(0);
+			expect(session?.recentToolCalls).toEqual([]);
+			expect(session?.warningIssued).toBe(false);
+			expect(session?.hardLimitHit).toBe(false);
+			expect(typeof session?.startTime).toBe('number');
+		});
+
+		it('endAgentSession removes entry', () => {
+			startAgentSession('s1', 'coder');
+			expect(getAgentSession('s1')).toBeDefined();
+
+			endAgentSession('s1');
+			expect(getAgentSession('s1')).toBeUndefined();
+		});
+
+		it('getAgentSession returns undefined for unknown', () => {
+			expect(getAgentSession('nonexistent')).toBeUndefined();
+		});
+
+		it('resetSwarmState clears agentSessions', () => {
+			startAgentSession('s1', 'coder');
+			startAgentSession('s2', 'reviewer');
+			expect(swarmState.agentSessions.size).toBe(2);
+
+			resetSwarmState();
+
+			expect(swarmState.agentSessions.size).toBe(0);
+		});
+
+		it('stale eviction removes old sessions', () => {
+			// Start an old session
+			startAgentSession('old-session', 'coder');
+			const oldSession = getAgentSession('old-session');
+			if (oldSession) {
+				oldSession.startTime = Date.now() - 7200000; // 2 hours ago
+			}
+
+			// Start a new session (triggers stale eviction with default 60 min)
+			startAgentSession('new-session', 'reviewer');
+
+			// Old session should be gone
+			expect(getAgentSession('old-session')).toBeUndefined();
+			// New session should exist
+			expect(getAgentSession('new-session')).toBeDefined();
+		});
+
+		it('stale eviction preserves recent sessions', () => {
+			// Start two sessions
+			startAgentSession('old-session', 'coder');
+			startAgentSession('recent-session', 'reviewer');
+
+			// Make one old
+			const oldSession = getAgentSession('old-session');
+			if (oldSession) {
+				oldSession.startTime = Date.now() - 7200000; // 2 hours ago
+			}
+
+			// Keep recent session recent
+			const recentSession = getAgentSession('recent-session');
+			if (recentSession) {
+				recentSession.startTime = Date.now() - 300000; // 5 minutes ago
+			}
+
+			// Start a new session (triggers stale eviction with default 60 min)
+			startAgentSession('new-session', 'explorer');
+
+			// Old session should be gone
+			expect(getAgentSession('old-session')).toBeUndefined();
+			// Recent session should still exist
+			expect(getAgentSession('recent-session')).toBeDefined();
+			// New session should exist
+			expect(getAgentSession('new-session')).toBeDefined();
 		});
 	});
 });

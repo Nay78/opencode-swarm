@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { AgentOverrideConfigSchema, SwarmConfigSchema, PluginConfigSchema } from '../../../src/config/schema';
+import { AgentOverrideConfigSchema, SwarmConfigSchema, PluginConfigSchema, GuardrailsConfigSchema } from '../../../src/config/schema';
 
 describe('AgentOverrideConfigSchema', () => {
   it('accepts empty object {}', () => {
@@ -243,6 +243,90 @@ describe('PluginConfigSchema', () => {
       expect(result.data.max_iterations).toBe(5); // Default applied
       expect(result.data.qa_retry_limit).toBe(3); // Default applied
       expect(result.data.inject_phase_reminders).toBe(true); // Default applied
+    }
+  });
+});
+
+describe('GuardrailsConfigSchema', () => {
+  it('accepts empty object and applies all defaults', () => {
+    const result = GuardrailsConfigSchema.safeParse({});
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.enabled).toBe(true);
+      expect(result.data.max_tool_calls).toBe(200);
+      expect(result.data.max_duration_minutes).toBe(30);
+      expect(result.data.max_repetitions).toBe(10);
+      expect(result.data.max_consecutive_errors).toBe(5);
+      expect(result.data.warning_threshold).toBe(0.5);
+    }
+  });
+
+  it('accepts partial config and merges defaults', () => {
+    const result = GuardrailsConfigSchema.safeParse({ max_tool_calls: 100 });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.max_tool_calls).toBe(100);
+      expect(result.data.enabled).toBe(true); // Default
+      expect(result.data.max_duration_minutes).toBe(30); // Default
+      expect(result.data.max_repetitions).toBe(10); // Default
+      expect(result.data.max_consecutive_errors).toBe(5); // Default
+      expect(result.data.warning_threshold).toBe(0.5); // Default
+    }
+  });
+
+  it('rejects max_tool_calls below 10', () => {
+    const result = GuardrailsConfigSchema.safeParse({ max_tool_calls: 5 });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects max_tool_calls above 1000', () => {
+    const result = GuardrailsConfigSchema.safeParse({ max_tool_calls: 1001 });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects warning_threshold below 0.1', () => {
+    const result = GuardrailsConfigSchema.safeParse({ warning_threshold: 0.05 });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects warning_threshold above 0.9', () => {
+    const result = GuardrailsConfigSchema.safeParse({ warning_threshold: 0.95 });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts all boundary values (minimums)', () => {
+    const result = GuardrailsConfigSchema.safeParse({
+      max_tool_calls: 10,
+      max_duration_minutes: 1,
+      max_repetitions: 3,
+      max_consecutive_errors: 2,
+      warning_threshold: 0.1,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.max_tool_calls).toBe(10);
+      expect(result.data.max_duration_minutes).toBe(1);
+      expect(result.data.max_repetitions).toBe(3);
+      expect(result.data.max_consecutive_errors).toBe(2);
+      expect(result.data.warning_threshold).toBe(0.1);
+    }
+  });
+
+  it('accepts all boundary values (maximums)', () => {
+    const result = GuardrailsConfigSchema.safeParse({
+      max_tool_calls: 1000,
+      max_duration_minutes: 120,
+      max_repetitions: 50,
+      max_consecutive_errors: 20,
+      warning_threshold: 0.9,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.max_tool_calls).toBe(1000);
+      expect(result.data.max_duration_minutes).toBe(120);
+      expect(result.data.max_repetitions).toBe(50);
+      expect(result.data.max_consecutive_errors).toBe(20);
+      expect(result.data.warning_threshold).toBe(0.9);
     }
   });
 });

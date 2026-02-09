@@ -1,0 +1,456 @@
+import { describe, it, expect, beforeEach } from 'bun:test';
+import { createGuardrailsHooks, hashArgs } from '../../../src/hooks/guardrails';
+import { resetSwarmState, swarmState, startAgentSession, getAgentSession } from '../../../src/state';
+import type { GuardrailsConfig } from '../../../src/config/schema';
+
+function defaultConfig(overrides?: Partial<GuardrailsConfig>): GuardrailsConfig {
+	return {
+		enabled: true,
+		max_tool_calls: 200,
+		max_duration_minutes: 30,
+		max_repetitions: 10,
+		max_consecutive_errors: 5,
+		warning_threshold: 0.5,
+		...overrides,
+	};
+}
+
+function makeInput(sessionID = 'test-session', tool = 'read', callID = 'call-1') {
+	return { tool, sessionID, callID };
+}
+
+function makeOutput(args: unknown = { filePath: '/test.ts' }) {
+	return { args };
+}
+
+function makeAfterOutput(output: string | null | undefined = 'success') {
+	return { title: 'Result', output, metadata: {} };
+}
+
+describe('guardrails circuit breaker', () => {
+	beforeEach(() => {
+		resetSwarmState();
+	});
+
+	describe('disabled guardrails', () => {
+		it('toolBefore does not throw when disabled', async () => {
+			const config = defaultConfig({ enabled: false });
+			const hooks = createGuardrailsHooks(config);
+
+			const input = makeInput();
+			const output = makeOutput();
+
+			await hooks.toolBefore(input, output);
+		});
+
+		it('messagesTransform does not inject when disabled', async () => {
+			const config = defaultConfig({ enabled: false });
+			const hooks = createGuardrailsHooks(config);
+
+			const messages = [{
+				info: { role: 'assistant', sessionID: 'test-session' },
+				parts: [{ type: 'text', text: 'Hello world' }],
+			}];
+
+			await hooks.messagesTransform({}, { messages });
+			expect(messages[0].parts[0].text).toBe('Hello world');
+		});
+	});
+
+	describe('toolBefore - tool call counting', () => {
+		it('increments tool call count', async () => {
+			const config = defaultConfig({ max_tool_calls: 100 });
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'coder');
+
+			for (let i = 0; i < 5; i++) {
+				await hooks.toolBefore(makeInput('test-session'), makeOutput());
+			}
+
+			const session = getAgentSession('test-session');
+			expect(session?.toolCallCount).toBe(5);
+		});
+
+		it('warning issued at threshold', async () => {
+			const config = defaultConfig({ max_tool_calls: 10, warning_threshold: 0.5 });
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'coder');
+
+			for (let i = 0; i < 5; i++) {
+				await hooks.toolBefore(makeInput('test-session'), makeOutput());
+			}
+
+			const session = getAgentSession('test-session');
+			expect(session?.warningIssued).toBe(true);
+		});
+
+		it('throws at hard limit', async () => {
+			const config = defaultConfig({ max_tool_calls: 5 });
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'coder');
+
+			// First 4 should not throw (0-4 increments, but limit is 5)
+			for (let i = 0; i < 4; i++) {
+				await hooks.toolBefore(makeInput('test-session'), makeOutput());
+			}
+
+			// 5th call should throw
+			await expect(hooks.toolBefore(makeInput('test-session'), makeOutput()))
+				.rejects.toThrow('Tool call limit');
+		});
+
+		it('blocks all subsequent calls after hard limit', async () => {
+			const config = defaultConfig({ max_tool_calls: 3 });
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'coder');
+
+			// First 2 should not throw
+			for (let i = 0; i < 2; i++) {
+				await hooks.toolBefore(makeInput('test-session'), makeOutput());
+			}
+
+			// 3rd call should throw and set hardLimitHit
+			await expect(hooks.toolBefore(makeInput('test-session'), makeOutput()))
+				.rejects.toThrow('Tool call limit');
+
+			// 4th call should also throw with different message
+			await expect(hooks.toolBefore(makeInput('test-session'), makeOutput()))
+				.rejects.toThrow('previously triggered');
+		});
+	});
+
+	describe('toolBefore - duration', () => {
+		it('throws at duration limit', async () => {
+			const config = defaultConfig({ max_duration_minutes: 30 });
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'coder');
+
+			// Manually set startTime to 31 minutes ago
+			const session = getAgentSession('test-session');
+			if (session) {
+				session.startTime = Date.now() - 31 * 60000;
+			}
+
+			await expect(hooks.toolBefore(makeInput('test-session'), makeOutput()))
+				.rejects.toThrow('Duration limit');
+		});
+
+		it('warning at duration threshold', async () => {
+			const config = defaultConfig({ max_duration_minutes: 30, warning_threshold: 0.5 });
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'coder');
+
+			// Manually set startTime to 16 minutes ago (above 15 min threshold)
+			const session = getAgentSession('test-session');
+			if (session) {
+				session.startTime = Date.now() - 16 * 60000;
+			}
+
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+
+			const updatedSession = getAgentSession('test-session');
+			expect(updatedSession?.warningIssued).toBe(true);
+		});
+	});
+
+	describe('toolBefore - repetition detection', () => {
+		it('detects repeated identical tool calls', async () => {
+			const config = defaultConfig({ max_repetitions: 3 });
+			const hooks = createGuardrailsHooks(config);
+			const args = { filePath: '/test.ts' };
+
+			// First 2 calls should be fine (0, 1, 2 - third triggers)
+			for (let i = 0; i < 2; i++) {
+				await hooks.toolBefore(makeInput('test-session'), makeOutput(args));
+			}
+
+			// 3rd identical call should throw
+			await expect(hooks.toolBefore(makeInput('test-session'), makeOutput(args)))
+				.rejects.toThrow('Repetition detected');
+		});
+
+		it('does not flag different tools', async () => {
+			const config = defaultConfig({ max_repetitions: 3 });
+			const hooks = createGuardrailsHooks(config);
+			const args = { filePath: '/test.ts' };
+
+			// Call with different tools but same args
+			await hooks.toolBefore(makeInput('test-session', 'read'), makeOutput(args));
+			await hooks.toolBefore(makeInput('test-session', 'grep'), makeOutput(args));
+			await hooks.toolBefore(makeInput('test-session', 'edit'), makeOutput(args));
+
+			// Should not throw
+			await hooks.toolBefore(makeInput('test-session', 'glob'), makeOutput(args));
+		});
+
+		it('does not flag different args', async () => {
+			const config = defaultConfig({ max_repetitions: 3 });
+			const hooks = createGuardrailsHooks(config);
+
+			// Call with same tool but different args
+			await hooks.toolBefore(makeInput('test-session'), makeOutput({ filePath: '/test1.ts' }));
+			await hooks.toolBefore(makeInput('test-session'), makeOutput({ filePath: '/test2.ts' }));
+			await hooks.toolBefore(makeInput('test-session'), makeOutput({ filePath: '/test3.ts' }));
+
+			// Should not throw
+			await hooks.toolBefore(makeInput('test-session'), makeOutput({ filePath: '/test4.ts' }));
+		});
+
+		it('warning at repetition threshold', async () => {
+			const config = defaultConfig({ max_repetitions: 10, warning_threshold: 0.5 });
+			const hooks = createGuardrailsHooks(config);
+			const args = { filePath: '/test.ts' };
+
+			// Make 5 identical calls (threshold is 5)
+			for (let i = 0; i < 5; i++) {
+				await hooks.toolBefore(makeInput('test-session'), makeOutput(args));
+			}
+
+			const session = getAgentSession('test-session');
+			expect(session?.warningIssued).toBe(true);
+
+			// Should not throw yet
+			await hooks.toolBefore(makeInput('test-session'), makeOutput(args));
+		});
+	});
+
+	describe('toolBefore - consecutive errors', () => {
+		it('throws at consecutive error limit', async () => {
+			const config = defaultConfig({ max_consecutive_errors: 5 });
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'coder');
+
+			const session = getAgentSession('test-session');
+			if (session) {
+				session.consecutiveErrors = 5;
+			}
+
+			await expect(hooks.toolBefore(makeInput('test-session'), makeOutput()))
+				.rejects.toThrow('consecutive errors');
+		});
+
+		it('does not throw when errors under limit', async () => {
+			const config = defaultConfig({ max_consecutive_errors: 5 });
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'coder');
+
+			const session = getAgentSession('test-session');
+			if (session) {
+				session.consecutiveErrors = 4;
+			}
+
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+		});
+	});
+
+	describe('toolBefore - auto session creation', () => {
+		it('auto-creates session if none exists', async () => {
+			const config = defaultConfig();
+			const hooks = createGuardrailsHooks(config);
+
+			// Session should not exist initially
+			expect(getAgentSession('new-session')).toBeUndefined();
+
+			// Call toolBefore with non-existent session
+			await hooks.toolBefore(makeInput('new-session'), makeOutput());
+
+			// Session should now exist
+			const session = getAgentSession('new-session');
+			expect(session).toBeDefined();
+			expect(session?.agentName).toBe('unknown');
+			expect(session?.toolCallCount).toBe(1);
+		});
+	});
+
+	describe('toolAfter - error tracking', () => {
+		it('increments consecutive errors on null output', async () => {
+			const config = defaultConfig();
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'coder');
+
+			const output = { title: 'Result', output: null as unknown as string, metadata: {} };
+			await hooks.toolAfter(makeInput('test-session'), output);
+
+			const session = getAgentSession('test-session');
+			expect(session?.consecutiveErrors).toBe(1);
+		});
+
+		it('increments consecutive errors on undefined output', async () => {
+			const config = defaultConfig();
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'coder');
+
+			const output = { title: 'Result', output: undefined as unknown as string, metadata: {} };
+			await hooks.toolAfter(makeInput('test-session'), output);
+
+			const session = getAgentSession('test-session');
+			expect(session?.consecutiveErrors).toBe(1);
+		});
+
+		it('resets consecutive errors on success', async () => {
+			const config = defaultConfig();
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'coder');
+
+			// Set some errors
+			const session = getAgentSession('test-session');
+			if (session) {
+				session.consecutiveErrors = 3;
+			}
+
+			// Success should reset
+			const output = { title: 'Result', output: 'success', metadata: {} };
+			await hooks.toolAfter(makeInput('test-session'), output);
+
+			expect(session?.consecutiveErrors).toBe(0);
+		});
+
+		it('returns early with no session', async () => {
+			const config = defaultConfig();
+			const hooks = createGuardrailsHooks(config);
+
+			// Should not throw even with no session
+			const output = { title: 'Result', output: 'success', metadata: {} };
+			await hooks.toolAfter(makeInput('nonexistent'), output);
+		});
+	});
+
+	describe('messagesTransform', () => {
+		it('injects warning when warningIssued', async () => {
+			const config = defaultConfig();
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'coder');
+
+			const session = getAgentSession('test-session');
+			if (session) {
+				session.warningIssued = true;
+			}
+
+			const messages = [{
+				info: { role: 'assistant', sessionID: 'test-session' },
+				parts: [{ type: 'text', text: 'Hello world' }],
+			}];
+
+			await hooks.messagesTransform({}, { messages });
+
+			expect(messages[0].parts[0].text).toContain('⚠️ GUARDRAIL WARNING');
+		});
+
+		it('injects hard stop when hardLimitHit', async () => {
+			const config = defaultConfig();
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'coder');
+
+			const session = getAgentSession('test-session');
+			if (session) {
+				session.hardLimitHit = true;
+			}
+
+			const messages = [{
+				info: { role: 'assistant', sessionID: 'test-session' },
+				parts: [{ type: 'text', text: 'Hello world' }],
+			}];
+
+			await hooks.messagesTransform({}, { messages });
+
+			expect(messages[0].parts[0].text).toContain('🛑 CIRCUIT BREAKER ACTIVE');
+		});
+
+		it('hard limit message takes precedence over warning', async () => {
+			const config = defaultConfig();
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'coder');
+
+			const session = getAgentSession('test-session');
+			if (session) {
+				session.warningIssued = true;
+				session.hardLimitHit = true;
+			}
+
+			const messages = [{
+				info: { role: 'assistant', sessionID: 'test-session' },
+				parts: [{ type: 'text', text: 'Hello world' }],
+			}];
+
+			await hooks.messagesTransform({}, { messages });
+
+			expect(messages[0].parts[0].text).toContain('🛑 CIRCUIT BREAKER ACTIVE');
+			expect(messages[0].parts[0].text).not.toContain('⚠️ GUARDRAIL WARNING');
+		});
+
+		it('does nothing with no messages', async () => {
+			const config = defaultConfig();
+			const hooks = createGuardrailsHooks(config);
+
+			await hooks.messagesTransform({}, { messages: [] });
+		});
+
+		it('does nothing with no active sessions', async () => {
+			const config = defaultConfig();
+			const hooks = createGuardrailsHooks(config);
+
+			const messages = [{
+				info: { role: 'assistant', sessionID: 'test-session' },
+				parts: [{ type: 'text', text: 'Hello world' }],
+			}];
+
+			const originalText = messages[0].parts[0].text;
+
+			await hooks.messagesTransform({}, { messages });
+
+			expect(messages[0].parts[0].text).toBe(originalText);
+		});
+	});
+
+	describe('hashArgs', () => {
+		it('same args produce same hash', () => {
+			const hash1 = hashArgs({ a: 1, b: 2 });
+			const hash2 = hashArgs({ a: 1, b: 2 });
+			expect(hash1).toBe(hash2);
+		});
+
+		it('different key order produces same hash', () => {
+			const hash1 = hashArgs({ a: 1, b: 2 });
+			const hash2 = hashArgs({ b: 2, a: 1 });
+			expect(hash1).toBe(hash2);
+		});
+
+		it('different args produce different hash', () => {
+			const hash1 = hashArgs({ a: 1 });
+			const hash2 = hashArgs({ a: 2 });
+			expect(hash1).not.toBe(hash2);
+		});
+
+		it('null returns 0', () => {
+			expect(hashArgs(null)).toBe(0);
+		});
+
+		it('non-object returns 0', () => {
+			expect(hashArgs('string')).toBe(0);
+			expect(hashArgs(123)).toBe(0);
+			expect(hashArgs(true)).toBe(0);
+		});
+
+		it('empty object returns a hash', () => {
+			const hash = hashArgs({});
+			expect(typeof hash).toBe('number');
+			// It could be 0 or non-zero, both are valid
+		});
+	});
+
+	describe('circular buffer', () => {
+		it('limits recentToolCalls to 20 entries', async () => {
+			const config = defaultConfig({ max_tool_calls: 1000 }); // High limit to avoid throwing
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'coder');
+
+			// Make 25 tool calls
+			for (let i = 0; i < 25; i++) {
+				await hooks.toolBefore(makeInput('test-session'), makeOutput({ index: i }));
+			}
+
+			const session = getAgentSession('test-session');
+			expect(session?.recentToolCalls.length).toBe(20);
+		});
+	});
+});

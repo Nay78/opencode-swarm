@@ -38,6 +38,32 @@ export interface DelegationEntry {
 }
 
 /**
+ * Represents per-session state for guardrail tracking
+ */
+export interface AgentSessionState {
+	/** Which agent this session belongs to */
+	agentName: string;
+
+	/** Date.now() when session started */
+	startTime: number;
+
+	/** Total tool calls in this session */
+	toolCallCount: number;
+
+	/** Consecutive errors (reset on success) */
+	consecutiveErrors: number;
+
+	/** Circular buffer of recent tool calls, max 20 entries */
+	recentToolCalls: Array<{ tool: string; argsHash: number; timestamp: number }>;
+
+	/** Whether a soft warning has been issued */
+	warningIssued: boolean;
+
+	/** Whether a hard limit has been triggered */
+	hardLimitHit: boolean;
+}
+
+/**
  * Singleton state object for sharing data across hooks
  */
 export const swarmState = {
@@ -55,6 +81,9 @@ export const swarmState = {
 
 	/** Number of events since last flush */
 	pendingEvents: 0,
+
+	/** Per-session guardrail state — keyed by sessionID */
+	agentSessions: new Map<string, AgentSessionState>(),
 };
 
 /**
@@ -66,4 +95,63 @@ export function resetSwarmState(): void {
 	swarmState.activeAgent.clear();
 	swarmState.delegationChains.clear();
 	swarmState.pendingEvents = 0;
+	swarmState.agentSessions.clear();
+}
+
+/**
+ * Start a new agent session with initialized guardrail state.
+ * Also removes any stale sessions older than staleDurationMs.
+ * @param sessionId - The session identifier
+ * @param agentName - The agent associated with this session
+ * @param staleDurationMs - Age threshold for stale session eviction (default: 60 min)
+ */
+export function startAgentSession(
+	sessionId: string,
+	agentName: string,
+	staleDurationMs = 3600000,
+): void {
+	const now = Date.now();
+
+	// Evict stale sessions (collect first to avoid delete-during-iteration)
+	const staleIds: string[] = [];
+	for (const [id, session] of swarmState.agentSessions) {
+		if (now - session.startTime > staleDurationMs) {
+			staleIds.push(id);
+		}
+	}
+	for (const id of staleIds) {
+		swarmState.agentSessions.delete(id);
+	}
+
+	// Create new session state
+	const sessionState: AgentSessionState = {
+		agentName,
+		startTime: now,
+		toolCallCount: 0,
+		consecutiveErrors: 0,
+		recentToolCalls: [],
+		warningIssued: false,
+		hardLimitHit: false,
+	};
+
+	swarmState.agentSessions.set(sessionId, sessionState);
+}
+
+/**
+ * End an agent session by removing it from the state.
+ * @param sessionId - The session identifier to remove
+ */
+export function endAgentSession(sessionId: string): void {
+	swarmState.agentSessions.delete(sessionId);
+}
+
+/**
+ * Get an agent session state by session ID.
+ * @param sessionId - The session identifier
+ * @returns The AgentSessionState or undefined if not found
+ */
+export function getAgentSession(
+	sessionId: string,
+): AgentSessionState | undefined {
+	return swarmState.agentSessions.get(sessionId);
 }
