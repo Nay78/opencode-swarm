@@ -140,7 +140,7 @@ Run multiple independent swarms with different model configurations.
    - `local_sme`
    - etc.
 
-3. **Each architect knows its agents**: The `local_architect` prompt is automatically updated to reference `@local_explorer`, `@local_coder`, etc.
+3. **Each architect knows its agents**: The `local_architect` prompt is automatically updated to reference `local_explorer`, `local_coder`, etc.
 
 4. **Display names in UI**: The `name` field (e.g., "Local") appears in descriptions.
 
