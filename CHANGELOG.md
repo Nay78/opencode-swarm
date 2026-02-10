@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.2] - 2026-02-10
+### Fixed
+- **Removed `@agent_name` prefixes from delegation prompts** — The architect's system prompt template included `@{{AGENT_PREFIX}}` routing metadata in delegation format examples, which caused subagents to waste tool calls attempting self-delegation via the Task tool. Routing is now handled solely by the `subagent_type` parameter. Updated `src/agents/architect.ts` (27 occurrences), `docs/installation.md`, and `.swarm/context.md`.
+
 ## [5.0.1] - 2026-02-10
 ### Changed
 - **Default architect guardrails** — The architect agent now automatically receives higher circuit breaker limits (600 tool calls, 90 min duration, 8 consecutive errors, 0.7 warning threshold) via `DEFAULT_ARCHITECT_PROFILE`. Proportional 3× scaling matches the architect's orchestration role. User-defined `profiles.architect` entries still take full precedence.
