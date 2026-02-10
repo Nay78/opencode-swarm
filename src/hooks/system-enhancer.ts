@@ -7,6 +7,7 @@
  */
 
 import type { PluginConfig } from '../config';
+import { stripKnownSwarmPrefix } from '../config/schema';
 import { loadPlan } from '../plan/manager';
 import { swarmState } from '../state';
 import { warn } from '../utils';
@@ -135,9 +136,8 @@ function extractAgentContext(
 
 	// Build context summary based on which agent is currently active
 	// The mapping tells agents what context from other agents is relevant to them
-	// Strip known swarm prefixes (e.g., "paid_coder" -> "coder", "local_test_engineer" -> "test_engineer")
-	// Only strips the first segment if it matches a known swarm ID pattern
-	const agentName = activeAgent.replace(/^(?:paid|local|mega|default)_/, '');
+	// Strip swarm prefix to get the base agent name (e.g., "enterprise_coder" -> "coder")
+	const agentName = stripKnownSwarmPrefix(activeAgent);
 
 	let contextSummary: string;
 	switch (agentName) {

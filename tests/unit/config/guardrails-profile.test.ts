@@ -3,6 +3,7 @@ import {
 	GuardrailsProfileSchema,
 	GuardrailsConfigSchema,
 	resolveGuardrailsConfig,
+	stripKnownSwarmPrefix,
 	DEFAULT_ARCHITECT_PROFILE,
 	type GuardrailsConfig,
 } from '../../../src/config/schema';
@@ -376,5 +377,135 @@ describe('resolveGuardrailsConfig architect defaults', () => {
 		const result = resolveGuardrailsConfig(config, 'coder');
 		expect(result.max_tool_calls).toBe(100); // coder profile
 		expect(result.max_duration_minutes).toBe(30); // base, NOT 90
+	});
+});
+
+describe('stripKnownSwarmPrefix', () => {
+	it("strips 'paid_' prefix", () => {
+		const result = stripKnownSwarmPrefix('paid_architect');
+		expect(result).toBe('architect');
+	});
+
+	it("strips 'local_' prefix", () => {
+		const result = stripKnownSwarmPrefix('local_coder');
+		expect(result).toBe('coder');
+	});
+
+	it("strips 'mega_' prefix", () => {
+		const result = stripKnownSwarmPrefix('mega_explorer');
+		expect(result).toBe('explorer');
+	});
+
+	it("strips 'default_' prefix", () => {
+		const result = stripKnownSwarmPrefix('default_sme');
+		expect(result).toBe('sme');
+	});
+
+	it('returns unprefixed name unchanged', () => {
+		const result = stripKnownSwarmPrefix('architect');
+		expect(result).toBe('architect');
+	});
+
+	it('returns empty string unchanged', () => {
+		const result = stripKnownSwarmPrefix('');
+		expect(result).toBe('');
+	});
+
+	it('strips any prefix ending with known agent name', () => {
+		const result = stripKnownSwarmPrefix('custom_architect');
+		expect(result).toBe('architect');
+	});
+
+	it('strips compound prefixes ending with known agent name', () => {
+		const result = stripKnownSwarmPrefix('paid_local_architect');
+		expect(result).toBe('architect');
+	});
+
+	it('does not strip when no known agent name suffix found', () => {
+		const result = stripKnownSwarmPrefix('custom_unknown');
+		expect(result).toBe('custom_unknown');
+	});
+});
+
+describe('resolveGuardrailsConfig with prefixed agent names', () => {
+	const base: GuardrailsConfig = {
+		enabled: true,
+		max_tool_calls: 200,
+		max_duration_minutes: 30,
+		max_repetitions: 10,
+		max_consecutive_errors: 5,
+		warning_threshold: 0.5,
+	};
+
+	it('local_architect gets architect defaults', () => {
+		const result = resolveGuardrailsConfig(base, 'local_architect');
+		expect(result.max_tool_calls).toBe(600);
+		expect(result.max_duration_minutes).toBe(90);
+	});
+
+	it('paid_architect gets architect defaults', () => {
+		const result = resolveGuardrailsConfig(base, 'paid_architect');
+		expect(result.max_tool_calls).toBe(600);
+		expect(result.max_duration_minutes).toBe(90);
+	});
+
+	it('mega_architect gets architect defaults', () => {
+		const result = resolveGuardrailsConfig(base, 'mega_architect');
+		expect(result.max_tool_calls).toBe(600);
+	});
+
+	it('local_coder does NOT get architect defaults (returns base)', () => {
+		const result = resolveGuardrailsConfig(base, 'local_coder');
+		expect(result).toBe(base);
+	});
+
+	it('profile lookup uses base name', () => {
+		const config: GuardrailsConfig = {
+			...base,
+			profiles: { coder: { max_tool_calls: 400 } },
+		};
+		const result = resolveGuardrailsConfig(config, 'local_coder');
+		expect(result.max_tool_calls).toBe(400);
+	});
+
+	it('prefixed profile name as fallback', () => {
+		const config: GuardrailsConfig = {
+			...base,
+			profiles: { paid_coder: { max_tool_calls: 350 } },
+		};
+		const result = resolveGuardrailsConfig(config, 'paid_coder');
+		expect(result.max_tool_calls).toBe(350);
+	});
+
+	it('user profile overrides architect built-in even with prefix', () => {
+		const config: GuardrailsConfig = {
+			...base,
+			profiles: { architect: { max_tool_calls: 300 } },
+		};
+		const result = resolveGuardrailsConfig(config, 'local_architect');
+		expect(result.max_tool_calls).toBe(300);
+		expect(result.max_duration_minutes).toBe(90);
+	});
+
+	it('custom swarm name architect gets architect defaults', () => {
+		const result = resolveGuardrailsConfig(base, 'enterprise_architect');
+		expect(result.max_tool_calls).toBe(600);
+		expect(result.max_duration_minutes).toBe(90);
+		expect(result.max_consecutive_errors).toBe(8);
+		expect(result.warning_threshold).toBe(0.7);
+	});
+
+	it('custom swarm name coder does NOT get architect defaults', () => {
+		const result = resolveGuardrailsConfig(base, 'team_alpha_coder');
+		expect(result).toBe(base);
+	});
+
+	it('custom swarm name profile lookup uses base name', () => {
+		const config: GuardrailsConfig = {
+			...base,
+			profiles: { coder: { max_tool_calls: 500 } },
+		};
+		const result = resolveGuardrailsConfig(config, 'myswarm_coder');
+		expect(result.max_tool_calls).toBe(500);
 	});
 });

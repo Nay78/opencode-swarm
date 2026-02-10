@@ -63,6 +63,18 @@ export declare const GuardrailsConfigSchema: z.ZodObject<{
 }, z.core.$strip>;
 export type GuardrailsConfig = z.infer<typeof GuardrailsConfigSchema>;
 /**
+ * Strip any swarm prefix from an agent name to get the base agent name.
+ * Works with any swarm name by checking if the name (or suffix after removing
+ * a prefix) matches a known agent name from ALL_AGENT_NAMES.
+ *
+ * Examples: 'local_architect' → 'architect', 'enterprise_coder' → 'coder',
+ *           'architect' → 'architect', 'unknown_thing' → 'unknown_thing'
+ *
+ * @param name - The agent name (possibly prefixed)
+ * @returns The base agent name if recognized, or the original name
+ */
+export declare function stripKnownSwarmPrefix(name: string): string;
+/**
  * Resolve guardrails configuration for a specific agent.
  * Merges the base config with built-in defaults (for the architect) and
  * any per-agent profile overrides. Merge order: base < built-in < user profile.

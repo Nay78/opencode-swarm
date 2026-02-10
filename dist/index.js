@@ -13638,12 +13638,26 @@ var GuardrailsConfigSchema = exports_external.object({
   warning_threshold: exports_external.number().min(0.1).max(0.9).default(0.5),
   profiles: exports_external.record(exports_external.string(), GuardrailsProfileSchema).optional()
 });
+function stripKnownSwarmPrefix(name) {
+  if (!name)
+    return name;
+  if (ALL_AGENT_NAMES.includes(name))
+    return name;
+  for (const agentName of ALL_AGENT_NAMES) {
+    const suffix = `_${agentName}`;
+    if (name.endsWith(suffix)) {
+      return agentName;
+    }
+  }
+  return name;
+}
 function resolveGuardrailsConfig(base, agentName) {
   if (!agentName) {
     return base;
   }
-  const builtIn = agentName === ORCHESTRATOR_NAME ? DEFAULT_ARCHITECT_PROFILE : undefined;
-  const userProfile = base.profiles?.[agentName];
+  const baseName = stripKnownSwarmPrefix(agentName);
+  const builtIn = baseName === ORCHESTRATOR_NAME ? DEFAULT_ARCHITECT_PROFILE : undefined;
+  const userProfile = base.profiles?.[baseName] ?? base.profiles?.[agentName];
   if (!builtIn && !userProfile) {
     return base;
   }
@@ -16222,11 +16236,18 @@ function createGuardrailsHooks(config2) {
     toolBefore: async (input, output) => {
       let session = getAgentSession(input.sessionID);
       if (!session) {
-        startAgentSession(input.sessionID, "unknown");
+        const agentName = swarmState.activeAgent.get(input.sessionID) ?? "unknown";
+        startAgentSession(input.sessionID, agentName);
         session = getAgentSession(input.sessionID);
         if (!session) {
           warn(`Failed to create session for ${input.sessionID}`);
           return;
+        }
+      } else if (session.agentName === "unknown") {
+        const activeAgentName = swarmState.activeAgent.get(input.sessionID);
+        if (activeAgentName) {
+          session.agentName = activeAgentName;
+          session.startTime = Date.now();
         }
       }
       const agentConfig = resolveGuardrailsConfig(config2, session.agentName);
@@ -16467,7 +16488,7 @@ function extractAgentContext(contextContent, activeAgent, maxChars) {
   const activitySection = activityMatch[1].trim();
   if (!activitySection || activitySection === "No tool activity recorded yet.")
     return null;
-  const agentName = activeAgent.replace(/^(?:paid|local|mega|default)_/, "");
+  const agentName = stripKnownSwarmPrefix(activeAgent);
   let contextSummary;
   switch (agentName) {
     case "coder":

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.3] - 2026-02-10
+### Fixed
+- **Guardrails circuit breaker now recognizes prefixed architect agents** — `resolveGuardrailsConfig()` previously compared the raw prefixed agent name (e.g., `local_architect`, `paid_architect`) against `ORCHESTRATOR_NAME` (`'architect'`) using exact match, which always failed. Added `stripKnownSwarmPrefix()` which uses suffix matching against `ALL_AGENT_NAMES` to strip **any** swarm prefix (not just hardcoded ones). Works for custom swarm names like `enterprise_architect`, `team_alpha_coder`, etc. Also fixed session creation in `guardrails.ts` to read the real agent name from `swarmState.activeAgent` instead of defaulting to `'unknown'`.
+
+### Tests
+- **19 new tests** for `stripKnownSwarmPrefix` (9 tests) and prefixed agent name resolution (10 tests, including custom swarm names).
+- **902 total tests** across 39 files (up from 883 in v5.0.1).
+
 ## [5.0.2] - 2026-02-10
 ### Fixed
 - **Removed `@agent_name` prefixes from delegation prompts** — The architect's system prompt template included `@{{AGENT_PREFIX}}` routing metadata in delegation format examples, which caused subagents to waste tool calls attempting self-delegation via the Task tool. Routing is now handled solely by the `subagent_type` parameter. Updated `src/agents/architect.ts` (27 occurrences), `docs/installation.md`, and `.swarm/context.md`.

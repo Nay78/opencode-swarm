@@ -55,11 +55,23 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 			// Get or create session
 			let session = getAgentSession(input.sessionID);
 			if (!session) {
-				startAgentSession(input.sessionID, 'unknown');
+				// Get the real agent name from swarmState if available
+				const agentName =
+					swarmState.activeAgent.get(input.sessionID) ?? 'unknown';
+
+				startAgentSession(input.sessionID, agentName);
 				session = getAgentSession(input.sessionID);
 				if (!session) {
 					warn(`Failed to create session for ${input.sessionID}`);
 					return;
+				}
+			} else if (session.agentName === 'unknown') {
+				// Update agent name if session was created with 'unknown' before the active agent was set
+				const activeAgentName = swarmState.activeAgent.get(input.sessionID);
+				if (activeAgentName) {
+					session.agentName = activeAgentName;
+					// Reset start time for accurate duration tracking with correct agent limits
+					session.startTime = Date.now();
 				}
 			}
 

@@ -915,7 +915,7 @@ ${longActivity}
 				expect(agentContext).toContain('Recent tool activity for review context:');
 			});
 
-			it('does NOT strip unknown prefix', async () => {
+			it('strips any custom prefix when agent name is known', async () => {
 				const swarmDir = join(tempDir, '.swarm');
 				await mkdir(swarmDir, { recursive: true });
 				await writeFile(join(swarmDir, 'plan.md'), '');
@@ -943,7 +943,7 @@ ${longActivity}
 				
 				const agentContext = output.system.find((s: string) => s.startsWith('[SWARM AGENT CONTEXT]'));
 			expect(agentContext).toBeDefined();
-			expect(agentContext).toContain('Agent activity summary:'); // Should use default label
+			expect(agentContext).toContain('Recent tool activity for review context:'); // custom_coder -> coder
 		});
 
 		it('strips "mega_" prefix correctly', async () => {

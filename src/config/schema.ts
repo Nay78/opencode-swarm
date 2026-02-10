@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ORCHESTRATOR_NAME } from './constants';
+import { ALL_AGENT_NAMES, ORCHESTRATOR_NAME } from './constants';
 
 // Agent override configuration
 export const AgentOverrideConfigSchema = z.object({
@@ -84,6 +84,31 @@ export const GuardrailsConfigSchema = z.object({
 export type GuardrailsConfig = z.infer<typeof GuardrailsConfigSchema>;
 
 /**
+ * Strip any swarm prefix from an agent name to get the base agent name.
+ * Works with any swarm name by checking if the name (or suffix after removing
+ * a prefix) matches a known agent name from ALL_AGENT_NAMES.
+ *
+ * Examples: 'local_architect' → 'architect', 'enterprise_coder' → 'coder',
+ *           'architect' → 'architect', 'unknown_thing' → 'unknown_thing'
+ *
+ * @param name - The agent name (possibly prefixed)
+ * @returns The base agent name if recognized, or the original name
+ */
+export function stripKnownSwarmPrefix(name: string): string {
+	if (!name) return name;
+	// If the name itself is a known agent name, return as-is
+	if ((ALL_AGENT_NAMES as readonly string[]).includes(name)) return name;
+	// Check if name ends with _<knownAgentName>
+	for (const agentName of ALL_AGENT_NAMES) {
+		const suffix = `_${agentName}`;
+		if (name.endsWith(suffix)) {
+			return agentName;
+		}
+	}
+	return name;
+}
+
+/**
  * Resolve guardrails configuration for a specific agent.
  * Merges the base config with built-in defaults (for the architect) and
  * any per-agent profile overrides. Merge order: base < built-in < user profile.
@@ -100,12 +125,16 @@ export function resolveGuardrailsConfig(
 		return base;
 	}
 
-	// Layer 1: Apply built-in defaults for the architect
+	// Strip known swarm prefixes to get the base agent name
+	const baseName = stripKnownSwarmPrefix(agentName);
+
+	// Layer 1: Apply built-in defaults for the architect (using base name)
 	const builtIn =
-		agentName === ORCHESTRATOR_NAME ? DEFAULT_ARCHITECT_PROFILE : undefined;
+		baseName === ORCHESTRATOR_NAME ? DEFAULT_ARCHITECT_PROFILE : undefined;
 
 	// Layer 2: Apply user-defined profile overrides (highest priority)
-	const userProfile = base.profiles?.[agentName];
+	// Check base name first, then fall back to prefixed name for backwards compatibility
+	const userProfile = base.profiles?.[baseName] ?? base.profiles?.[agentName];
 
 	if (!builtIn && !userProfile) {
 		return base;
