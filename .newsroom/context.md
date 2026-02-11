@@ -4,11 +4,12 @@
 
 | Tool | Calls | Success | Failed | Avg Duration |
 |------|-------|---------|--------|--------------|
-| read | 37 | 37 | 0 | 3ms |
-| edit | 21 | 21 | 0 | 945ms |
-| bash | 14 | 14 | 0 | 1590ms |
-| task | 8 | 8 | 0 | 104229ms |
-| grep | 7 | 7 | 0 | 1228ms |
-| todowrite | 6 | 6 | 0 | 1ms |
-| write | 5 | 5 | 0 | 398ms |
-| glob | 3 | 3 | 0 | 22ms |
+| read | 172 | 172 | 0 | 244ms |
+| bash | 94 | 94 | 0 | 1937ms |
+| edit | 75 | 75 | 0 | 1007ms |
+| task | 29 | 29 | 0 | 136658ms |
+| grep | 24 | 24 | 0 | 59ms |
+| todowrite | 21 | 21 | 0 | 12ms |
+| glob | 13 | 13 | 0 | 25ms |
+| write | 9 | 9 | 0 | 531ms |
+| apply_patch | 4 | 4 | 0 | 4ms |

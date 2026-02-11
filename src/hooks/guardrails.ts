@@ -117,7 +117,10 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 				);
 			}
 
-			if (elapsedMinutes >= agentConfig.max_duration_minutes) {
+			if (
+				agentConfig.max_duration_minutes > 0 &&
+				elapsedMinutes >= agentConfig.max_duration_minutes
+			) {
 				session.hardLimitHit = true;
 				warn('Circuit breaker: duration limit hit', {
 					sessionID: input.sessionID,
@@ -144,10 +147,28 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 				);
 			}
 
+			// Check IDLE timeout — detects agents stuck without successful tool calls
+			const idleMinutes = (Date.now() - session.lastSuccessTime) / 60000;
+			if (idleMinutes >= agentConfig.idle_timeout_minutes) {
+				session.hardLimitHit = true;
+				warn('Circuit breaker: idle timeout hit', {
+					sessionID: input.sessionID,
+					agentName: session.agentName,
+					idleTimeoutMinutes: agentConfig.idle_timeout_minutes,
+					idleMinutes: Math.floor(idleMinutes),
+				});
+				throw new Error(
+					`🛑 LIMIT REACHED: No successful tool call for ${Math.floor(idleMinutes)} minutes (idle timeout: ${agentConfig.idle_timeout_minutes} min). This suggests the agent may be stuck. Return your progress summary.`,
+				);
+			}
+
 			// Check SOFT limits (only if warning not already issued)
 			if (!session.warningIssued) {
 				const toolPct = session.toolCallCount / agentConfig.max_tool_calls;
-				const durationPct = elapsedMinutes / agentConfig.max_duration_minutes;
+				const durationPct =
+					agentConfig.max_duration_minutes > 0
+						? elapsedMinutes / agentConfig.max_duration_minutes
+						: 0;
 				const repPct = repetitionCount / agentConfig.max_repetitions;
 				const errorPct =
 					session.consecutiveErrors / agentConfig.max_consecutive_errors;
@@ -198,6 +219,7 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 				session.consecutiveErrors++;
 			} else {
 				session.consecutiveErrors = 0;
+				session.lastSuccessTime = Date.now();
 			}
 		},
 

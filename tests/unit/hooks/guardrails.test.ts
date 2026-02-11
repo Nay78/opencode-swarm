@@ -8,6 +8,7 @@ import type { GuardrailsConfig } from '../../../src/config/schema';
 			enabled: true,
 			max_tool_calls: 200,
 			max_duration_minutes: 30,
+			idle_timeout_minutes: 60,
 			max_repetitions: 10,
 			max_consecutive_errors: 5,
 			warning_threshold: 0.75,
@@ -455,7 +456,7 @@ describe('guardrails circuit breaker', () => {
 		});
 	});
 
-	describe('per-agent profiles', () => {
+		describe('per-agent profiles', () => {
 		it('agent with profile gets higher tool call limit', async () => {
 			const config = defaultConfig({
 				max_tool_calls: 10,
@@ -676,6 +677,161 @@ describe('guardrails circuit breaker', () => {
 					makeOutput(args),
 				),
 			).rejects.toThrow('Repeated the same tool call');
+		});
+	});
+
+	describe('toolBefore - unlimited duration (0)', () => {
+		it('does not throw when max_duration_minutes is 0 even after long time', async () => {
+			const config = defaultConfig({ max_duration_minutes: 0 });
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'unknown');
+
+			// Set start time to 500 minutes ago
+			const session = getAgentSession('test-session');
+			if (session) {
+				session.startTime = Date.now() - 500 * 60000;
+				// Keep lastSuccessTime recent to avoid idle timeout
+				session.lastSuccessTime = Date.now();
+			}
+
+			// Should NOT throw — duration is unlimited
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+		});
+
+		it('does not issue duration warning when max_duration_minutes is 0', async () => {
+			const config = defaultConfig({ max_duration_minutes: 0, warning_threshold: 0.5 });
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'unknown');
+
+			const session = getAgentSession('test-session');
+			if (session) {
+				session.startTime = Date.now() - 100 * 60000;
+				session.lastSuccessTime = Date.now();
+			}
+
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+
+			const updatedSession = getAgentSession('test-session');
+			// Warning should NOT be issued for duration (other limits may warn)
+			expect(updatedSession?.warningIssued).toBe(false);
+		});
+
+		it('architect profile has unlimited duration by default', async () => {
+			const config = defaultConfig();
+			const hooks = createGuardrailsHooks(config);
+
+			// Set up architect session
+			swarmState.activeAgent.set('arch-session', 'architect');
+			startAgentSession('arch-session', 'architect');
+
+			// Set start time to 200 minutes ago (way beyond old 90 min limit)
+			const session = getAgentSession('arch-session');
+			if (session) {
+				session.startTime = Date.now() - 200 * 60000;
+				session.lastSuccessTime = Date.now();
+			}
+
+			// Should NOT throw — architect has max_duration_minutes: 0 (unlimited)
+			await hooks.toolBefore(makeInput('arch-session'), makeOutput());
+		});
+	});
+
+	describe('toolBefore - idle timeout', () => {
+		it('throws when idle timeout exceeded', async () => {
+			const config = defaultConfig({ idle_timeout_minutes: 30 });
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'unknown');
+
+			// Set lastSuccessTime to 31 minutes ago
+			const session = getAgentSession('test-session');
+			if (session) {
+				session.lastSuccessTime = Date.now() - 31 * 60000;
+			}
+
+			await expect(hooks.toolBefore(makeInput('test-session'), makeOutput()))
+				.rejects.toThrow('No successful tool call for');
+		});
+
+		it('does not throw when idle timeout not exceeded', async () => {
+			const config = defaultConfig({ idle_timeout_minutes: 30 });
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'unknown');
+
+			// lastSuccessTime is set to now by startAgentSession, so should be fine
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+		});
+
+		it('idle timeout resets on successful tool call', async () => {
+			const config = defaultConfig({ idle_timeout_minutes: 30 });
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'unknown');
+
+			// Set lastSuccessTime to 29 minutes ago (close but not exceeded)
+			const session = getAgentSession('test-session');
+			if (session) {
+				session.lastSuccessTime = Date.now() - 29 * 60000;
+			}
+
+			// Should not throw
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+
+			// Simulate successful tool call via toolAfter
+			await hooks.toolAfter(makeInput('test-session'), { title: 'Result', output: 'success', metadata: {} });
+
+			// Now set the time again — it should have been reset by toolAfter
+			const updatedSession = getAgentSession('test-session');
+			expect(updatedSession?.lastSuccessTime).toBeGreaterThan(Date.now() - 1000);
+		});
+	});
+
+	describe('toolAfter - lastSuccessTime tracking', () => {
+		it('updates lastSuccessTime on success', async () => {
+			const config = defaultConfig();
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'coder');
+
+			// Set lastSuccessTime to old time
+			const session = getAgentSession('test-session');
+			if (session) {
+				session.lastSuccessTime = Date.now() - 60000;
+			}
+
+			const beforeTime = Date.now();
+			await hooks.toolAfter(makeInput('test-session'), { title: 'Result', output: 'success', metadata: {} });
+
+			expect(session?.lastSuccessTime).toBeGreaterThanOrEqual(beforeTime);
+		});
+
+		it('does not update lastSuccessTime on null output', async () => {
+			const config = defaultConfig();
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'coder');
+
+			const oldTime = Date.now() - 60000;
+			const session = getAgentSession('test-session');
+			if (session) {
+				session.lastSuccessTime = oldTime;
+			}
+
+			await hooks.toolAfter(makeInput('test-session'), { title: 'Result', output: null as unknown as string, metadata: {} });
+
+			expect(session?.lastSuccessTime).toBe(oldTime);
+		});
+
+		it('does not update lastSuccessTime on undefined output', async () => {
+			const config = defaultConfig();
+			const hooks = createGuardrailsHooks(config);
+			startAgentSession('test-session', 'coder');
+
+			const oldTime = Date.now() - 60000;
+			const session = getAgentSession('test-session');
+			if (session) {
+				session.lastSuccessTime = oldTime;
+			}
+
+			await hooks.toolAfter(makeInput('test-session'), { title: 'Result', output: undefined as unknown as string, metadata: {} });
+
+			expect(session?.lastSuccessTime).toBe(oldTime);
 		});
 	});
 });

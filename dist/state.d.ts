@@ -59,6 +59,8 @@ export interface AgentSessionState {
     warningReason: string;
     /** Whether a hard limit has been triggered */
     hardLimitHit: boolean;
+    /** Timestamp of most recent SUCCESSFUL tool call (for idle timeout) */
+    lastSuccessTime: number;
 }
 /**
  * Singleton state object for sharing data across hooks

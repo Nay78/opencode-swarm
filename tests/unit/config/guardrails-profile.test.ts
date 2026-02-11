@@ -45,15 +45,20 @@ describe('GuardrailsProfileSchema', () => {
 		).toThrow();
 	});
 
-	it('invalid max_duration_minutes (below 1) rejects', () => {
+	it('max_duration_minutes 0 (unlimited) parses', () => {
+		const result = GuardrailsProfileSchema.parse({ max_duration_minutes: 0 });
+		expect(result.max_duration_minutes).toBe(0);
+	});
+
+	it('invalid max_duration_minutes (below 0) rejects', () => {
 		expect(() =>
-			GuardrailsProfileSchema.parse({ max_duration_minutes: 0 }),
+			GuardrailsProfileSchema.parse({ max_duration_minutes: -1 }),
 		).toThrow();
 	});
 
-	it('invalid max_duration_minutes (above 120) rejects', () => {
+	it('invalid max_duration_minutes (above 480) rejects', () => {
 		expect(() =>
-			GuardrailsProfileSchema.parse({ max_duration_minutes: 150 }),
+			GuardrailsProfileSchema.parse({ max_duration_minutes: 500 }),
 		).toThrow();
 	});
 
@@ -103,6 +108,7 @@ describe('GuardrailsConfigSchema with profiles', () => {
 			max_repetitions: 10,
 			max_consecutive_errors: 5,
 			warning_threshold: 0.75,
+			idle_timeout_minutes: 60,
 			profiles: {
 				coder: { max_tool_calls: 400 },
 				explorer: { max_duration_minutes: 60 },
@@ -121,6 +127,7 @@ describe('GuardrailsConfigSchema with profiles', () => {
 			max_repetitions: 10,
 			max_consecutive_errors: 5,
 			warning_threshold: 0.75,
+			idle_timeout_minutes: 60,
 		};
 
 		const result = GuardrailsConfigSchema.parse(config);
@@ -135,6 +142,7 @@ describe('GuardrailsConfigSchema with profiles', () => {
 			max_repetitions: 10,
 			max_consecutive_errors: 5,
 			warning_threshold: 0.75,
+			idle_timeout_minutes: 60,
 			profiles: {},
 		};
 
@@ -167,6 +175,7 @@ describe('resolveGuardrailsConfig', () => {
 		max_repetitions: 10,
 		max_consecutive_errors: 5,
 		warning_threshold: 0.75,
+		idle_timeout_minutes: 60,
 		profiles: {
 			coder: { max_tool_calls: 20, warning_threshold: 0.7 },
 			explorer: { max_duration_minutes: 60 },
@@ -249,6 +258,7 @@ describe('resolveGuardrailsConfig', () => {
 			max_repetitions: 10,
 			max_consecutive_errors: 5,
 			warning_threshold: 0.75,
+			idle_timeout_minutes: 60,
 			profiles: {
 				test_engineer: { max_consecutive_errors: 2 }, // Only override one field
 			},
@@ -270,6 +280,7 @@ describe('resolveGuardrailsConfig', () => {
 			max_repetitions: 5,
 			max_consecutive_errors: 3,
 			warning_threshold: 0.75,
+			idle_timeout_minutes: 60,
 			profiles: {
 				coder: { max_tool_calls: 100 },
 				explorer: { max_duration_minutes: 40 },
@@ -296,12 +307,13 @@ describe('resolveGuardrailsConfig architect defaults', () => {
 		max_repetitions: 10,
 		max_consecutive_errors: 5,
 		warning_threshold: 0.75,
+		idle_timeout_minutes: 60,
 	};
 
 	it('architect gets built-in default profile automatically', () => {
 		const result = resolveGuardrailsConfig(base, 'architect');
 		expect(result.max_tool_calls).toBe(800);
-		expect(result.max_duration_minutes).toBe(90);
+		expect(result.max_duration_minutes).toBe(0);
 		expect(result.max_consecutive_errors).toBe(8);
 		expect(result.warning_threshold).toBe(0.75);
 	});
@@ -328,7 +340,7 @@ describe('resolveGuardrailsConfig architect defaults', () => {
 
 		const result = resolveGuardrailsConfig(config, 'architect');
 		expect(result.max_tool_calls).toBe(300); // User wins
-		expect(result.max_duration_minutes).toBe(90); // Built-in
+		expect(result.max_duration_minutes).toBe(0); // Built-in
 		expect(result.warning_threshold).toBe(0.75); // Built-in
 	});
 
@@ -355,7 +367,7 @@ describe('resolveGuardrailsConfig architect defaults', () => {
 	it('DEFAULT_ARCHITECT_PROFILE values match DEFAULT_AGENT_PROFILES.architect', () => {
 		const result = GuardrailsProfileSchema.parse(DEFAULT_ARCHITECT_PROFILE);
 		expect(result.max_tool_calls).toBe(800);
-		expect(result.max_duration_minutes).toBe(90);
+		expect(result.max_duration_minutes).toBe(0);
 		expect(result.max_consecutive_errors).toBe(8);
 		expect(result.warning_threshold).toBe(0.75);
 	});
@@ -429,18 +441,19 @@ describe('resolveGuardrailsConfig with prefixed agent names', () => {
 		max_repetitions: 10,
 		max_consecutive_errors: 5,
 		warning_threshold: 0.75,
+		idle_timeout_minutes: 60,
 	};
 
 	it('local_architect gets architect defaults', () => {
 		const result = resolveGuardrailsConfig(base, 'local_architect');
 		expect(result.max_tool_calls).toBe(800);
-		expect(result.max_duration_minutes).toBe(90);
+		expect(result.max_duration_minutes).toBe(0);
 	});
 
 	it('paid_architect gets architect defaults', () => {
 		const result = resolveGuardrailsConfig(base, 'paid_architect');
 		expect(result.max_tool_calls).toBe(800);
-		expect(result.max_duration_minutes).toBe(90);
+		expect(result.max_duration_minutes).toBe(0);
 	});
 
 	it('mega_architect gets architect defaults', () => {
@@ -480,13 +493,13 @@ describe('resolveGuardrailsConfig with prefixed agent names', () => {
 		};
 		const result = resolveGuardrailsConfig(config, 'local_architect');
 		expect(result.max_tool_calls).toBe(300);
-		expect(result.max_duration_minutes).toBe(90);
+		expect(result.max_duration_minutes).toBe(0);
 	});
 
 	it('custom swarm name architect gets architect defaults', () => {
 		const result = resolveGuardrailsConfig(base, 'enterprise_architect');
 		expect(result.max_tool_calls).toBe(800);
-		expect(result.max_duration_minutes).toBe(90);
+		expect(result.max_duration_minutes).toBe(0);
 		expect(result.max_consecutive_errors).toBe(8);
 		expect(result.warning_threshold).toBe(0.75);
 	});
@@ -505,5 +518,34 @@ describe('resolveGuardrailsConfig with prefixed agent names', () => {
 		};
 		const result = resolveGuardrailsConfig(config, 'myswarm_coder');
 		expect(result.max_tool_calls).toBe(500);
+	});
+});
+
+describe('GuardrailsProfileSchema idle_timeout_minutes', () => {
+	it('valid idle_timeout_minutes parses', () => {
+		const result = GuardrailsProfileSchema.parse({ idle_timeout_minutes: 30 });
+		expect(result.idle_timeout_minutes).toBe(30);
+	});
+
+	it('idle_timeout_minutes at min (5) parses', () => {
+		const result = GuardrailsProfileSchema.parse({ idle_timeout_minutes: 5 });
+		expect(result.idle_timeout_minutes).toBe(5);
+	});
+
+	it('idle_timeout_minutes at max (240) parses', () => {
+		const result = GuardrailsProfileSchema.parse({ idle_timeout_minutes: 240 });
+		expect(result.idle_timeout_minutes).toBe(240);
+	});
+
+	it('idle_timeout_minutes below min (4) rejects', () => {
+		expect(() =>
+			GuardrailsProfileSchema.parse({ idle_timeout_minutes: 4 }),
+		).toThrow();
+	});
+
+	it('idle_timeout_minutes above max (241) rejects', () => {
+		expect(() =>
+			GuardrailsProfileSchema.parse({ idle_timeout_minutes: 241 }),
+		).toThrow();
 	});
 });

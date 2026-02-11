@@ -67,6 +67,9 @@ export interface AgentSessionState {
 
 	/** Whether a hard limit has been triggered */
 	hardLimitHit: boolean;
+
+	/** Timestamp of most recent SUCCESSFUL tool call (for idle timeout) */
+	lastSuccessTime: number;
 }
 
 /**
@@ -119,7 +122,7 @@ export function startAgentSession(
 	const now = Date.now();
 
 	// Evict stale sessions based on last activity, not start time
-	// Default: 2 hours — must exceed the max possible agent duration (120 min from schema)
+	// Default: 2 hours — should exceed typical agent durations (evicts inactive sessions)
 	const staleIds: string[] = [];
 	for (const [id, session] of swarmState.agentSessions) {
 		if (now - session.lastToolCallTime > staleDurationMs) {
@@ -141,6 +144,7 @@ export function startAgentSession(
 		warningIssued: false,
 		warningReason: '',
 		hardLimitHit: false,
+		lastSuccessTime: now,
 	};
 
 	swarmState.agentSessions.set(sessionId, sessionState);

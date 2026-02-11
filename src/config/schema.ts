@@ -55,10 +55,11 @@ export type EvidenceConfig = z.infer<typeof EvidenceConfigSchema>;
 // Guardrails profile (per-agent overrides - all fields optional)
 export const GuardrailsProfileSchema = z.object({
 	max_tool_calls: z.number().min(10).max(1000).optional(),
-	max_duration_minutes: z.number().min(1).max(120).optional(),
+	max_duration_minutes: z.number().min(0).max(480).optional(),
 	max_repetitions: z.number().min(3).max(50).optional(),
 	max_consecutive_errors: z.number().min(2).max(20).optional(),
 	warning_threshold: z.number().min(0.1).max(0.9).optional(),
+	idle_timeout_minutes: z.number().min(5).max(240).optional(),
 });
 
 export type GuardrailsProfile = z.infer<typeof GuardrailsProfileSchema>;
@@ -66,7 +67,7 @@ export type GuardrailsProfile = z.infer<typeof GuardrailsProfileSchema>;
 export const DEFAULT_AGENT_PROFILES: Record<string, GuardrailsProfile> = {
 	architect: {
 		max_tool_calls: 800,
-		max_duration_minutes: 90,
+		max_duration_minutes: 0,
 		max_consecutive_errors: 8,
 		warning_threshold: 0.75,
 	},
@@ -109,10 +110,11 @@ export const DEFAULT_ARCHITECT_PROFILE = DEFAULT_AGENT_PROFILES.architect;
 export const GuardrailsConfigSchema = z.object({
 	enabled: z.boolean().default(true),
 	max_tool_calls: z.number().min(10).max(1000).default(200),
-	max_duration_minutes: z.number().min(1).max(120).default(30),
+	max_duration_minutes: z.number().min(0).max(480).default(30),
 	max_repetitions: z.number().min(3).max(50).default(10),
 	max_consecutive_errors: z.number().min(2).max(20).default(5),
 	warning_threshold: z.number().min(0.1).max(0.9).default(0.75),
+	idle_timeout_minutes: z.number().min(5).max(240).default(60),
 	profiles: z.record(z.string(), GuardrailsProfileSchema).optional(),
 });
 

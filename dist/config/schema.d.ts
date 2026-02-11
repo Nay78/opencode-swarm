@@ -43,6 +43,7 @@ export declare const GuardrailsProfileSchema: z.ZodObject<{
     max_repetitions: z.ZodOptional<z.ZodNumber>;
     max_consecutive_errors: z.ZodOptional<z.ZodNumber>;
     warning_threshold: z.ZodOptional<z.ZodNumber>;
+    idle_timeout_minutes: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
 export type GuardrailsProfile = z.infer<typeof GuardrailsProfileSchema>;
 export declare const DEFAULT_AGENT_PROFILES: Record<string, GuardrailsProfile>;
@@ -53,6 +54,7 @@ export declare const DEFAULT_ARCHITECT_PROFILE: {
     max_repetitions?: number | undefined;
     max_consecutive_errors?: number | undefined;
     warning_threshold?: number | undefined;
+    idle_timeout_minutes?: number | undefined;
 };
 export declare const GuardrailsConfigSchema: z.ZodObject<{
     enabled: z.ZodDefault<z.ZodBoolean>;
@@ -61,12 +63,14 @@ export declare const GuardrailsConfigSchema: z.ZodObject<{
     max_repetitions: z.ZodDefault<z.ZodNumber>;
     max_consecutive_errors: z.ZodDefault<z.ZodNumber>;
     warning_threshold: z.ZodDefault<z.ZodNumber>;
+    idle_timeout_minutes: z.ZodDefault<z.ZodNumber>;
     profiles: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
         max_tool_calls: z.ZodOptional<z.ZodNumber>;
         max_duration_minutes: z.ZodOptional<z.ZodNumber>;
         max_repetitions: z.ZodOptional<z.ZodNumber>;
         max_consecutive_errors: z.ZodOptional<z.ZodNumber>;
         warning_threshold: z.ZodOptional<z.ZodNumber>;
+        idle_timeout_minutes: z.ZodOptional<z.ZodNumber>;
     }, z.core.$strip>>>;
 }, z.core.$strip>;
 export type GuardrailsConfig = z.infer<typeof GuardrailsConfigSchema>;
@@ -130,12 +134,14 @@ export declare const PluginConfigSchema: z.ZodObject<{
         max_repetitions: z.ZodDefault<z.ZodNumber>;
         max_consecutive_errors: z.ZodDefault<z.ZodNumber>;
         warning_threshold: z.ZodDefault<z.ZodNumber>;
+        idle_timeout_minutes: z.ZodDefault<z.ZodNumber>;
         profiles: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
             max_tool_calls: z.ZodOptional<z.ZodNumber>;
             max_duration_minutes: z.ZodOptional<z.ZodNumber>;
             max_repetitions: z.ZodOptional<z.ZodNumber>;
             max_consecutive_errors: z.ZodOptional<z.ZodNumber>;
             warning_threshold: z.ZodOptional<z.ZodNumber>;
+            idle_timeout_minutes: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>>>;
     }, z.core.$strip>>;
     evidence: z.ZodOptional<z.ZodObject<{

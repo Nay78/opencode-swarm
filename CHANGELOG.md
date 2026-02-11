@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.8] - 2026-02-11
+### Fixed
+- **Circuit breaker killing architect sessions prematurely** — The fundamental architectural flaw was that the duration check used a hard cap of 120 minutes in the schema with no way to disable it. The architect's 90-minute default was too low for multi-phase projects. Three changes fix this:
+  1. **Unlimited duration for architects** — `max_duration_minutes: 0` now means "no time limit". The architect's built-in profile defaults to 0 (unlimited).
+  2. **Idle timeout replaces hard duration cap** — New `idle_timeout_minutes` field (default: 60 min) detects truly stuck agents by tracking time since last SUCCESSFUL tool call, rather than penalizing productive long-running sessions.
+  3. **Schema range expanded** — `max_duration_minutes` max raised from 120 to 480 minutes for users who want finite but long sessions.
+
+### Added
+- `idle_timeout_minutes` field in `GuardrailsProfileSchema` and `GuardrailsConfigSchema` — configurable per-agent idle detection (min: 5, max: 240, default: 60).
+- `lastSuccessTime` field in `AgentSessionState` — tracks timestamp of most recent successful tool call for idle timeout calculation.
+- Idle timeout hard limit check in circuit breaker — throws when no successful tool call for `idle_timeout_minutes` minutes.
+- Division-by-zero guard for duration soft warning when `max_duration_minutes` is 0.
+
+### Changed
+- `DEFAULT_AGENT_PROFILES.architect.max_duration_minutes` changed from 90 to 0 (unlimited).
+- `GuardrailsProfileSchema.max_duration_minutes` range changed from `min(1).max(120)` to `min(0).max(480)`.
+- `GuardrailsConfigSchema.max_duration_minutes` range changed from `min(1).max(120)` to `min(0).max(480)`.
+
+### Tests
+- Updated schema tests for new `max_duration_minutes` range (0 valid, 480 max) and architect default (0).
+- Added `idle_timeout_minutes` schema validation tests (5 tests).
+- Added unlimited duration circuit breaker tests (3 tests).
+- Added idle timeout circuit breaker tests (3 tests).
+- Added `lastSuccessTime` tracking tests (3 tests).
+- Updated `GuardrailsConfigSchema` tests to include `idle_timeout_minutes: 60` default.
+- Total: 927 tests passing (was 909).
+
 ## [5.0.7] - 2026-02-11
 ### Fixed
 - **Removed stale orphan declaration files from dist/** — Deleted 17 stale `.d.ts` files from prior build configurations that no longer have matching source files: `dist/agents/auditor.d.ts`, `dist/agents/security-reviewer.d.ts`, `dist/agents/sme-unified.d.ts`, and the entire `dist/agents/sme/` directory (14 individual SME domain agent declarations). These were harmless type declarations (not runtime code), but cluttered the published package.
