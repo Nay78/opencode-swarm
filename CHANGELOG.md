@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.9] - 2026-02-11
+### Fixed
+- **Stale 30-minute guardrail when agent switches** — Session state (counters, tracking data) now resets when `agentName` changes in `ensureAgentSession()`, preventing previous agent's limits from affecting the new agent.
+- **Architect tool-call limit unlimited** — `max_tool_calls: 0` now means "no limit". Schema and profile updated to accept 0. Architect's built-in profile defaults to 0 (unlimited), matching the duration behavior from v5.0.8.
+- **Tool-call checks skipped when unlimited** — Hard-limit and warning logic now bypasses tool-call validation when `max_tool_calls` is 0, avoiding false positive warnings/blocks.
+
 ## [5.0.8] - 2026-02-11
 ### Fixed
 - **Circuit breaker killing architect sessions prematurely** — The fundamental architectural flaw was that the duration check used a hard cap of 120 minutes in the schema with no way to disable it. The architect's 90-minute default was too low for multi-phase projects. Three changes fix this:

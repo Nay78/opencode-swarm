@@ -13617,7 +13617,7 @@ var EvidenceConfigSchema = exports_external.object({
   auto_archive: exports_external.boolean().default(false)
 });
 var GuardrailsProfileSchema = exports_external.object({
-  max_tool_calls: exports_external.number().min(10).max(1000).optional(),
+  max_tool_calls: exports_external.number().min(0).max(1000).optional(),
   max_duration_minutes: exports_external.number().min(0).max(480).optional(),
   max_repetitions: exports_external.number().min(3).max(50).optional(),
   max_consecutive_errors: exports_external.number().min(2).max(20).optional(),
@@ -13626,7 +13626,7 @@ var GuardrailsProfileSchema = exports_external.object({
 });
 var DEFAULT_AGENT_PROFILES = {
   architect: {
-    max_tool_calls: 800,
+    max_tool_calls: 0,
     max_duration_minutes: 0,
     max_consecutive_errors: 8,
     warning_threshold: 0.75
@@ -13665,7 +13665,7 @@ var DEFAULT_AGENT_PROFILES = {
 var DEFAULT_ARCHITECT_PROFILE = DEFAULT_AGENT_PROFILES.architect;
 var GuardrailsConfigSchema = exports_external.object({
   enabled: exports_external.boolean().default(true),
-  max_tool_calls: exports_external.number().min(10).max(1000).default(200),
+  max_tool_calls: exports_external.number().min(0).max(1000).default(200),
   max_duration_minutes: exports_external.number().min(0).max(480).default(30),
   max_repetitions: exports_external.number().min(3).max(50).default(10),
   max_consecutive_errors: exports_external.number().min(2).max(20).default(5),
@@ -16022,9 +16022,16 @@ function ensureAgentSession(sessionId, agentName) {
   const now = Date.now();
   let session = swarmState.agentSessions.get(sessionId);
   if (session) {
-    if (agentName && session.agentName === "unknown") {
+    if (agentName && agentName !== session.agentName) {
       session.agentName = agentName;
       session.startTime = now;
+      session.toolCallCount = 0;
+      session.consecutiveErrors = 0;
+      session.recentToolCalls = [];
+      session.warningIssued = false;
+      session.warningReason = "";
+      session.hardLimitHit = false;
+      session.lastSuccessTime = now;
     }
     session.lastToolCallTime = now;
     return session;
@@ -16320,7 +16327,7 @@ function createGuardrailsHooks(config2) {
         }
       }
       const elapsedMinutes = (Date.now() - session.startTime) / 60000;
-      if (session.toolCallCount >= agentConfig.max_tool_calls) {
+      if (agentConfig.max_tool_calls > 0 && session.toolCallCount >= agentConfig.max_tool_calls) {
         session.hardLimitHit = true;
         warn("Circuit breaker: tool call limit hit", {
           sessionID: input.sessionID,
@@ -16360,12 +16367,12 @@ function createGuardrailsHooks(config2) {
         throw new Error(`\uD83D\uDED1 LIMIT REACHED: No successful tool call for ${Math.floor(idleMinutes)} minutes (idle timeout: ${agentConfig.idle_timeout_minutes} min). This suggests the agent may be stuck. Return your progress summary.`);
       }
       if (!session.warningIssued) {
-        const toolPct = session.toolCallCount / agentConfig.max_tool_calls;
+        const toolPct = agentConfig.max_tool_calls > 0 ? session.toolCallCount / agentConfig.max_tool_calls : 0;
         const durationPct = agentConfig.max_duration_minutes > 0 ? elapsedMinutes / agentConfig.max_duration_minutes : 0;
         const repPct = repetitionCount / agentConfig.max_repetitions;
         const errorPct = session.consecutiveErrors / agentConfig.max_consecutive_errors;
         const reasons = [];
-        if (toolPct >= agentConfig.warning_threshold) {
+        if (agentConfig.max_tool_calls > 0 && toolPct >= agentConfig.warning_threshold) {
           reasons.push(`tool calls ${session.toolCallCount}/${agentConfig.max_tool_calls}`);
         }
         if (durationPct >= agentConfig.warning_threshold) {
