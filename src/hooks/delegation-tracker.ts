@@ -22,32 +22,40 @@ export function createDelegationTrackerHook(
 		input: { sessionID: string; agent?: string },
 		_output: Record<string, unknown>,
 	): Promise<void> => {
-		// If no agent is specified, return immediately
+		// If no agent is specified, only reset delegationActive on existing session
+		// and return without updating activeAgent or creating a new session
 		if (!input.agent || input.agent === '') {
+			const session = swarmState.agentSessions.get(input.sessionID);
+			if (session) {
+				session.delegationActive = false;
+			}
 			return;
 		}
+
+		const agentName = input.agent;
 
 		// Get the previous agent for this session
 		const previousAgent = swarmState.activeAgent.get(input.sessionID);
 
 		// Update the active agent
-		swarmState.activeAgent.set(input.sessionID, input.agent);
+		swarmState.activeAgent.set(input.sessionID, agentName);
 
 		// Ensure guardrail session exists with correct agent name
 		// This prevents the race condition where tool.execute.before fires
 		// before chat.message, causing sessions to be created with 'unknown'
-		ensureAgentSession(input.sessionID, input.agent);
+		const session = ensureAgentSession(input.sessionID, agentName);
+		session.delegationActive = true;
 
 		// If delegation tracking is enabled and agent has changed, log the delegation
 		if (
 			config.hooks?.delegation_tracker === true &&
 			previousAgent &&
-			previousAgent !== input.agent
+			previousAgent !== agentName
 		) {
 			// Create a delegation entry
 			const entry: DelegationEntry = {
 				from: previousAgent,
-				to: input.agent,
+				to: agentName,
 				timestamp: Date.now(),
 			};
 

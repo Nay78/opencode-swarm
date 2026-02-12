@@ -15,7 +15,7 @@ import {
 	createSystemEnhancerHook,
 	safeHook,
 } from './hooks';
-import { swarmState } from './state';
+import { ensureAgentSession, swarmState } from './state';
 import { detect_domains, extract_code_blocks, gitingest } from './tools';
 import { log } from './utils';
 
@@ -137,6 +137,20 @@ const OpenCodeSwarm: Plugin = async (ctx) => {
 			if (!swarmState.activeAgent.has(input.sessionID)) {
 				swarmState.activeAgent.set(input.sessionID, ORCHESTRATOR_NAME);
 			}
+
+			// Revert to primary agent if delegation is not active
+			const session = swarmState.agentSessions.get(input.sessionID);
+			const activeAgent = swarmState.activeAgent.get(input.sessionID);
+			if (
+				session &&
+				activeAgent &&
+				activeAgent !== ORCHESTRATOR_NAME &&
+				session.delegationActive === false
+			) {
+				swarmState.activeAgent.set(input.sessionID, ORCHESTRATOR_NAME);
+				ensureAgentSession(input.sessionID, ORCHESTRATOR_NAME);
+			}
+
 			// Guardrails runs first WITHOUT safeHook — throws must propagate to block tools
 			await guardrailsHooks.toolBefore(input, output);
 			// Activity tracking runs second WITH safeHook — errors should not propagate

@@ -16066,7 +16066,8 @@ function startAgentSession(sessionId, agentName, staleDurationMs = 7200000) {
     warningIssued: false,
     warningReason: "",
     hardLimitHit: false,
-    lastSuccessTime: now
+    lastSuccessTime: now,
+    delegationActive: false
   };
   swarmState.agentSessions.set(sessionId, sessionState);
 }
@@ -16087,6 +16088,7 @@ function ensureAgentSession(sessionId, agentName) {
       session.warningReason = "";
       session.hardLimitHit = false;
       session.lastSuccessTime = now;
+      session.delegationActive = false;
     }
     session.lastToolCallTime = now;
     return session;
@@ -16322,15 +16324,21 @@ function createContextBudgetHandler(config2) {
 function createDelegationTrackerHook(config2) {
   return async (input, _output) => {
     if (!input.agent || input.agent === "") {
+      const session2 = swarmState.agentSessions.get(input.sessionID);
+      if (session2) {
+        session2.delegationActive = false;
+      }
       return;
     }
+    const agentName = input.agent;
     const previousAgent = swarmState.activeAgent.get(input.sessionID);
-    swarmState.activeAgent.set(input.sessionID, input.agent);
-    ensureAgentSession(input.sessionID, input.agent);
-    if (config2.hooks?.delegation_tracker === true && previousAgent && previousAgent !== input.agent) {
+    swarmState.activeAgent.set(input.sessionID, agentName);
+    const session = ensureAgentSession(input.sessionID, agentName);
+    session.delegationActive = true;
+    if (config2.hooks?.delegation_tracker === true && previousAgent && previousAgent !== agentName) {
       const entry = {
         from: previousAgent,
-        to: input.agent,
+        to: agentName,
         timestamp: Date.now()
       };
       if (!swarmState.delegationChains.has(input.sessionID)) {
@@ -29569,6 +29577,12 @@ var OpenCodeSwarm = async (ctx) => {
     "tool.execute.before": async (input, output) => {
       if (!swarmState.activeAgent.has(input.sessionID)) {
         swarmState.activeAgent.set(input.sessionID, ORCHESTRATOR_NAME);
+      }
+      const session = swarmState.agentSessions.get(input.sessionID);
+      const activeAgent = swarmState.activeAgent.get(input.sessionID);
+      if (session && activeAgent && activeAgent !== ORCHESTRATOR_NAME && session.delegationActive === false) {
+        swarmState.activeAgent.set(input.sessionID, ORCHESTRATOR_NAME);
+        ensureAgentSession(input.sessionID, ORCHESTRATOR_NAME);
       }
       await guardrailsHooks.toolBefore(input, output);
       await safeHook(activityHooks.toolBefore)(input, output);

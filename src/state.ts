@@ -70,6 +70,9 @@ export interface AgentSessionState {
 
 	/** Timestamp of most recent SUCCESSFUL tool call (for idle timeout) */
 	lastSuccessTime: number;
+
+	/** Whether active delegation is in progress for this session */
+	delegationActive: boolean;
 }
 
 /**
@@ -145,6 +148,7 @@ export function startAgentSession(
 		warningReason: '',
 		hardLimitHit: false,
 		lastSuccessTime: now,
+		delegationActive: false,
 	};
 
 	swarmState.agentSessions.set(sessionId, sessionState);
@@ -199,6 +203,8 @@ export function ensureAgentSession(
 			session.warningReason = '';
 			session.hardLimitHit = false;
 			session.lastSuccessTime = now;
+			// Reset delegation state on agent switch
+			session.delegationActive = false;
 		}
 		session.lastToolCallTime = now;
 		return session;

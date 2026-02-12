@@ -61,6 +61,8 @@ export interface AgentSessionState {
     hardLimitHit: boolean;
     /** Timestamp of most recent SUCCESSFUL tool call (for idle timeout) */
     lastSuccessTime: number;
+    /** Whether active delegation is in progress for this session */
+    delegationActive: boolean;
 }
 /**
  * Singleton state object for sharing data across hooks
