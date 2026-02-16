@@ -178,11 +178,24 @@ export const GuardrailsConfigSchema = z.object({
 export type GuardrailsConfig = z.infer<typeof GuardrailsConfigSchema>;
 
 /**
+ * Normalize an agent name for comparison (lowercase + consistent separators).
+ * Converts hyphens and spaces to underscores for consistent matching.
+ */
+function normalizeAgentName(name: string): string {
+	return name.toLowerCase().replace(/[-\s]+/g, '_');
+}
+
+/**
  * Strip any swarm prefix from an agent name to get the base agent name.
  * Works with any swarm name by checking if the name (or suffix after removing
  * a prefix) matches a known agent name from ALL_AGENT_NAMES.
  *
+ * Normalization handles:
+ * - Case-insensitive matching (e.g., "PAID_ARCHITECT" → "architect")
+ * - Multiple separators: underscore, hyphen, space (e.g., "paid-architect", "paid architect")
+ *
  * Examples: 'local_architect' → 'architect', 'enterprise_coder' → 'coder',
+ *           'paid-architect' → 'architect', 'PAID_ARCHITECT' → 'architect',
  *           'architect' → 'architect', 'unknown_thing' → 'unknown_thing'
  *
  * @param name - The agent name (possibly prefixed)
@@ -190,12 +203,19 @@ export type GuardrailsConfig = z.infer<typeof GuardrailsConfigSchema>;
  */
 export function stripKnownSwarmPrefix(name: string): string {
 	if (!name) return name;
-	// If the name itself is a known agent name, return as-is
+	// If the name itself is a known agent name (exact match), return as-is
 	if ((ALL_AGENT_NAMES as readonly string[]).includes(name)) return name;
-	// Check if name ends with _<knownAgentName>
+	// Normalize the input name for flexible matching
+	const normalized = normalizeAgentName(name);
+	// Check each known agent name
 	for (const agentName of ALL_AGENT_NAMES) {
-		const suffix = `_${agentName}`;
-		if (name.endsWith(suffix)) {
+		const normalizedAgent = normalizeAgentName(agentName);
+		// Direct normalized match (name IS a known agent)
+		if (normalized === normalizedAgent) return agentName;
+		// Suffix match: check if normalized name ends with _<knownAgentName>
+		// This handles underscore, hyphen, and space separators uniformly
+		// after normalization to underscore
+		if (normalized.endsWith('_' + normalizedAgent)) {
 			return agentName;
 		}
 	}

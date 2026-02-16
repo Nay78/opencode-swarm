@@ -170,7 +170,12 @@ export type GuardrailsConfig = z.infer<typeof GuardrailsConfigSchema>;
  * Works with any swarm name by checking if the name (or suffix after removing
  * a prefix) matches a known agent name from ALL_AGENT_NAMES.
  *
+ * Normalization handles:
+ * - Case-insensitive matching (e.g., "PAID_ARCHITECT" → "architect")
+ * - Multiple separators: underscore, hyphen, space (e.g., "paid-architect", "paid architect")
+ *
  * Examples: 'local_architect' → 'architect', 'enterprise_coder' → 'coder',
+ *           'paid-architect' → 'architect', 'PAID_ARCHITECT' → 'architect',
  *           'architect' → 'architect', 'unknown_thing' → 'unknown_thing'
  *
  * @param name - The agent name (possibly prefixed)

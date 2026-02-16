@@ -13687,14 +13687,20 @@ var GuardrailsConfigSchema = exports_external.object({
   idle_timeout_minutes: exports_external.number().min(5).max(240).default(60),
   profiles: exports_external.record(exports_external.string(), GuardrailsProfileSchema).optional()
 });
+function normalizeAgentName(name) {
+  return name.toLowerCase().replace(/[-\s]+/g, "_");
+}
 function stripKnownSwarmPrefix(name) {
   if (!name)
     return name;
   if (ALL_AGENT_NAMES.includes(name))
     return name;
+  const normalized = normalizeAgentName(name);
   for (const agentName of ALL_AGENT_NAMES) {
-    const suffix = `_${agentName}`;
-    if (name.endsWith(suffix)) {
+    const normalizedAgent = normalizeAgentName(agentName);
+    if (normalized === normalizedAgent)
+      return agentName;
+    if (normalized.endsWith("_" + normalizedAgent)) {
       return agentName;
     }
   }

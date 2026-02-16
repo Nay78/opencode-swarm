@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.7] - 2026-02-16
+### Fixed
+- **Architect identity normalization hardening** — `stripKnownSwarmPrefix` now handles case-insensitive and separator variants (underscore/hyphen/space) when stripping agent prefixes. Paid architect naming variants (e.g., `paid_architect`, `paid-architect`, `PAID ARCHITECT`) now correctly resolve to the orchestrator identity for exemption purposes. Subagent and unknown agent guardrails behavior remains unchanged.
+
 ## [5.1.6] - 2026-02-15
 ### Fixed
 - **Architect identity-stuck hotfix** — Split tool-activity and agent-identity timestamps to prevent stale subagent identity from persisting during frequent tool calls. The `lastAgentEventTime` is now updated via `ensureAgentSession` (which handles agent name changes) rather than redundant manual updates, ensuring accurate stale detection and proper architect exemption during delegation handoffs.
