@@ -9,7 +9,12 @@ import { ORCHESTRATOR_NAME } from '../config/constants';
 import type { PluginConfig } from '../config/schema';
 import { stripKnownSwarmPrefix } from '../config/schema';
 import type { DelegationEntry } from '../state';
-import { ensureAgentSession, swarmState, updateAgentEventTime } from '../state';
+import {
+	beginInvocation,
+	ensureAgentSession,
+	swarmState,
+	updateAgentEventTime,
+} from '../state';
 
 /**
  * Creates the chat.message hook for delegation tracking.
@@ -68,6 +73,13 @@ export function createDelegationTrackerHook(
 		// Set delegationActive: false for architect, true for subagents
 		// This ensures stale detection works correctly for both cases
 		session.delegationActive = !isArchitect;
+
+		// Start new invocation window for non-architect agents
+		// CRITICAL: Always call beginInvocation, even if same agent as previous
+		// (handles architect → coder → architect → coder re-invocation pattern)
+		if (!isArchitect) {
+			beginInvocation(input.sessionID, agentName);
+		}
 
 		// If delegation tracking is enabled and agent has changed, log the delegation
 		if (

@@ -15,7 +15,9 @@ import { ORCHESTRATOR_NAME } from '../../src/config/constants';
 import type { GuardrailsConfig } from '../../src/config/schema';
 import { createGuardrailsHooks } from '../../src/hooks/guardrails';
 import {
+	beginInvocation,
 	ensureAgentSession,
+	getActiveWindow,
 	resetSwarmState,
 	swarmState,
 } from '../../src/state';
@@ -57,8 +59,12 @@ describe('Circuit Breaker Race Condition', () => {
 		const session = ensureAgentSession(sessionId, 'mega_coder');
 		session.delegationActive = true;
 
+		// Create invocation window for subagent
+		beginInvocation(sessionId, 'mega_coder');
+		const window = getActiveWindow(sessionId)!;
+
 		// 2. Simulate 6 minutes of subagent work (exceeds generic 5 min limit)
-		session.startTime = Date.now() - 6 * 60000;
+		window.startedAtMs = Date.now() - 6 * 60000;
 		session.lastToolCallTime = Date.now() - 6 * 60000;
 
 		// 3. Subagent finishes - chat.message sets delegationActive=false
@@ -117,8 +123,12 @@ describe('Circuit Breaker Race Condition', () => {
 		const session = ensureAgentSession(sessionId, 'mega_coder');
 		session.delegationActive = true;
 
+		// Create invocation window for subagent
+		beginInvocation(sessionId, 'mega_coder');
+		const window = getActiveWindow(sessionId)!;
+
 		// Simulate 6 minutes of work, then 11 seconds of idle time
-		session.startTime = Date.now() - 6 * 60000 - 11000;
+		window.startedAtMs = Date.now() - 6 * 60000 - 11000;
 		session.lastToolCallTime = Date.now() - 11000; // 11 seconds ago
 
 		// Simulate the stale delegation detection from index.ts (lines 161-174)
@@ -144,9 +154,9 @@ describe('Circuit Breaker Race Condition', () => {
 		// Verify session was reset with architect name
 		const updatedSession = swarmState.agentSessions.get(sessionId);
 		expect(updatedSession?.agentName).toBe(ORCHESTRATOR_NAME);
-		// Tool call count should be 0 because architect is exempt and guardrails returns early
-		// without incrementing the counter (ensureAgentSession resets it, then early return skips increment)
-		expect(updatedSession?.toolCallCount).toBe(0);
+		// Architect has no active window (exempt from guardrails)
+		const archWindow = getActiveWindow(sessionId);
+		expect(archWindow).toBeUndefined();
 	});
 
 	it('should NOT exempt subagent within 10-second window (legitimate subagent work)', async () => {
@@ -173,8 +183,12 @@ describe('Circuit Breaker Race Condition', () => {
 		const session = ensureAgentSession(sessionId, 'mega_coder');
 		session.delegationActive = true;
 
+		// Create invocation window for subagent
+		beginInvocation(sessionId, 'mega_coder');
+		const window = getActiveWindow(sessionId)!;
+
 		// Simulate 7 minutes of work (exceeds 6 min limit), but last tool call was recent
-		session.startTime = Date.now() - 7 * 60000;
+		window.startedAtMs = Date.now() - 7 * 60000;
 		session.lastToolCallTime = Date.now() - 5000; // 5 seconds ago (within 10s window)
 
 		// Subagent should hit circuit breaker because:
@@ -197,7 +211,7 @@ describe('Circuit Breaker Race Condition', () => {
 		).rejects.toThrow(/LIMIT REACHED.*Duration exhausted/);
 
 		// Verify hardLimitHit flag is set
-		expect(session.hardLimitHit).toBe(true);
+		expect(window.hardLimitHit).toBe(true);
 	});
 
 	it('should handle rapid architect→subagent→architect transitions', async () => {
@@ -294,8 +308,12 @@ describe('Circuit Breaker Race Condition', () => {
 		const session = ensureAgentSession(sessionId, 'mega_coder');
 		session.delegationActive = true;
 
+		// Create invocation window for subagent
+		beginInvocation(sessionId, 'mega_coder');
+		const window = getActiveWindow(sessionId)!;
+
 		// Simulate work just under coder's 45 min limit
-		session.startTime = Date.now() - 44 * 60000;
+		window.startedAtMs = Date.now() - 44 * 60000;
 		session.lastToolCallTime = Date.now() - 1000;
 
 		// Should NOT throw (within limits)
@@ -307,7 +325,7 @@ describe('Circuit Breaker Race Condition', () => {
 		).resolves.toBeUndefined();
 
 		// Now simulate exceeding the limit
-		session.startTime = Date.now() - 46 * 60000;
+		window.startedAtMs = Date.now() - 46 * 60000;
 
 		// Should throw (exceeded 45 min limit)
 		await expect(
@@ -341,8 +359,12 @@ describe('Circuit Breaker Race Condition', () => {
 		swarmState.activeAgent.set(sessionId, 'custom_mystery_agent');
 		const session = ensureAgentSession(sessionId, 'custom_mystery_agent');
 
+		// Create invocation window for agent
+		beginInvocation(sessionId, 'custom_mystery_agent');
+		const window = getActiveWindow(sessionId)!;
+
 		// Simulate 50 minutes of work (would exceed base config limit of 30 minutes)
-		session.startTime = Date.now() - 50 * 60000;
+		window.startedAtMs = Date.now() - 50 * 60000;
 		session.lastToolCallTime = Date.now() - 1000;
 
 		// Should throw because unknown agents get base config (not architect exempt)

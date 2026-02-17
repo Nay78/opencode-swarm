@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { createGuardrailsHooks, hashArgs } from '../../../src/hooks/guardrails';
-import { resetSwarmState, swarmState, startAgentSession, getAgentSession, ensureAgentSession } from '../../../src/state';
+import { resetSwarmState, swarmState, startAgentSession, getAgentSession, ensureAgentSession, getActiveWindow, beginInvocation } from '../../../src/state';
 import type { GuardrailsConfig } from '../../../src/config/schema';
 
 	function defaultConfig(overrides?: Partial<GuardrailsConfig>): GuardrailsConfig {
@@ -25,7 +25,7 @@ function makeOutput(args: unknown = { filePath: '/test.ts' }) {
 	return { args };
 }
 
-function makeAfterOutput(output: string | null | undefined = 'success') {
+function makeAfterOutput(output: string = 'success') {
 	return { title: 'Result', output, metadata: {} };
 }
 
@@ -69,8 +69,8 @@ describe('guardrails circuit breaker', () => {
 				await hooks.toolBefore(makeInput('test-session'), makeOutput());
 			}
 
-			const session = getAgentSession('test-session');
-			expect(session?.toolCallCount).toBe(5);
+			const window = getActiveWindow('test-session');
+			expect(window?.toolCalls).toBe(5);
 		});
 
 		it('warning issued at threshold', async () => {
@@ -90,8 +90,8 @@ describe('guardrails circuit breaker', () => {
 				);
 			}
 
-			const session = getAgentSession('test-session');
-			expect(session?.warningIssued).toBe(true);
+			const window = getActiveWindow('test-session');
+			expect(window?.warningIssued).toBe(true);
 		});
 
 		it('throws at hard limit', async () => {
@@ -144,14 +144,15 @@ describe('guardrails circuit breaker', () => {
 			const hooks = createGuardrailsHooks(config);
 			startAgentSession('test-session', 'coder');
 
-			// Manually set startTime to 31 minutes ago
-			const session = getAgentSession('test-session');
-			if (session) {
-				session.startTime = Date.now() - 31 * 60000;
+			// First call creates the window via fallback beginInvocation
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+			const window = getActiveWindow('test-session');
+			if (window) {
+				window.startedAtMs = Date.now() - 31 * 60000;
 			}
 
-		await expect(hooks.toolBefore(makeInput('test-session'), makeOutput()))
-			.rejects.toThrow('Duration exhausted');
+			await expect(hooks.toolBefore(makeInput('test-session'), makeOutput()))
+				.rejects.toThrow('Duration exhausted');
 		});
 
 		it('warning at duration threshold', async () => {
@@ -163,16 +164,17 @@ describe('guardrails circuit breaker', () => {
 			const hooks = createGuardrailsHooks(config);
 			startAgentSession('test-session', 'coder');
 
-			// Manually set startTime to 16 minutes ago (above 15 min threshold)
-			const session = getAgentSession('test-session');
-			if (session) {
-				session.startTime = Date.now() - 16 * 60000;
+			// First call creates the window
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+			const window = getActiveWindow('test-session');
+			if (window) {
+				window.startedAtMs = Date.now() - 16 * 60000;
 			}
 
 			await hooks.toolBefore(makeInput('test-session'), makeOutput());
 
-			const updatedSession = getAgentSession('test-session');
-			expect(updatedSession?.warningIssued).toBe(true);
+			const updatedWindow = getActiveWindow('test-session');
+			expect(updatedWindow?.warningIssued).toBe(true);
 		});
 	});
 
@@ -234,8 +236,8 @@ describe('guardrails circuit breaker', () => {
 				await hooks.toolBefore(makeInput('test-session'), makeOutput(args));
 			}
 
-			const session = getAgentSession('test-session');
-			expect(session?.warningIssued).toBe(true);
+			const window = getActiveWindow('test-session');
+			expect(window?.warningIssued).toBe(true);
 
 			// Should not throw yet
 			await hooks.toolBefore(makeInput('test-session'), makeOutput(args));
@@ -248,13 +250,15 @@ describe('guardrails circuit breaker', () => {
 			const hooks = createGuardrailsHooks(config);
 			startAgentSession('test-session', 'coder');
 
-			const session = getAgentSession('test-session');
-			if (session) {
-				session.consecutiveErrors = 5;
+			// First call creates the window
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+			const window = getActiveWindow('test-session');
+			if (window) {
+				window.consecutiveErrors = 5;
 			}
 
-		await expect(hooks.toolBefore(makeInput('test-session'), makeOutput()))
-			.rejects.toThrow('consecutive tool errors detected');
+			await expect(hooks.toolBefore(makeInput('test-session'), makeOutput()))
+				.rejects.toThrow('consecutive tool errors detected');
 		});
 
 		it('does not throw when errors under limit', async () => {
@@ -262,9 +266,11 @@ describe('guardrails circuit breaker', () => {
 			const hooks = createGuardrailsHooks(config);
 			startAgentSession('test-session', 'coder');
 
-			const session = getAgentSession('test-session');
-			if (session) {
-				session.consecutiveErrors = 4;
+			// First call creates the window
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+			const window = getActiveWindow('test-session');
+			if (window) {
+				window.consecutiveErrors = 4;
 			}
 
 			await hooks.toolBefore(makeInput('test-session'), makeOutput());
@@ -286,7 +292,10 @@ describe('guardrails circuit breaker', () => {
 			const session = getAgentSession('new-session');
 			expect(session).toBeDefined();
 			expect(session?.agentName).toBe('unknown');
-			expect(session?.toolCallCount).toBe(1);
+
+			// Check window for tool call count
+			const window = getActiveWindow('new-session');
+			expect(window?.toolCalls).toBe(1);
 		});
 	});
 
@@ -296,11 +305,13 @@ describe('guardrails circuit breaker', () => {
 			const hooks = createGuardrailsHooks(config);
 			startAgentSession('test-session', 'coder');
 
+			// First call creates the window
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
 			const output = { title: 'Result', output: null as unknown as string, metadata: {} };
 			await hooks.toolAfter(makeInput('test-session'), output);
 
-			const session = getAgentSession('test-session');
-			expect(session?.consecutiveErrors).toBe(1);
+			const window = getActiveWindow('test-session');
+			expect(window?.consecutiveErrors).toBe(1);
 		});
 
 		it('increments consecutive errors on undefined output', async () => {
@@ -308,11 +319,13 @@ describe('guardrails circuit breaker', () => {
 			const hooks = createGuardrailsHooks(config);
 			startAgentSession('test-session', 'coder');
 
+			// First call creates the window
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
 			const output = { title: 'Result', output: undefined as unknown as string, metadata: {} };
 			await hooks.toolAfter(makeInput('test-session'), output);
 
-			const session = getAgentSession('test-session');
-			expect(session?.consecutiveErrors).toBe(1);
+			const window = getActiveWindow('test-session');
+			expect(window?.consecutiveErrors).toBe(1);
 		});
 
 		it('resets consecutive errors on success', async () => {
@@ -320,17 +333,18 @@ describe('guardrails circuit breaker', () => {
 			const hooks = createGuardrailsHooks(config);
 			startAgentSession('test-session', 'coder');
 
-			// Set some errors
-			const session = getAgentSession('test-session');
-			if (session) {
-				session.consecutiveErrors = 3;
+			// First call creates the window
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+			const window = getActiveWindow('test-session');
+			if (window) {
+				window.consecutiveErrors = 3;
 			}
 
 			// Success should reset
 			const output = { title: 'Result', output: 'success', metadata: {} };
 			await hooks.toolAfter(makeInput('test-session'), output);
 
-			expect(session?.consecutiveErrors).toBe(0);
+			expect(window?.consecutiveErrors).toBe(0);
 		});
 
 		it('returns early with no session', async () => {
@@ -349,9 +363,11 @@ describe('guardrails circuit breaker', () => {
 			const hooks = createGuardrailsHooks(config);
 			startAgentSession('test-session', 'coder');
 
-			const session = getAgentSession('test-session');
-			if (session) {
-				session.warningIssued = true;
+			// First call creates the window
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+			const window = getActiveWindow('test-session');
+			if (window) {
+				window.warningIssued = true;
 			}
 
 			const messages = [{
@@ -369,9 +385,11 @@ describe('guardrails circuit breaker', () => {
 			const hooks = createGuardrailsHooks(config);
 			startAgentSession('test-session', 'coder');
 
-			const session = getAgentSession('test-session');
-			if (session) {
-				session.hardLimitHit = true;
+			// First call creates the window
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+			const window = getActiveWindow('test-session');
+			if (window) {
+				window.hardLimitHit = true;
 			}
 
 			const messages = [{
@@ -389,10 +407,12 @@ describe('guardrails circuit breaker', () => {
 			const hooks = createGuardrailsHooks(config);
 			startAgentSession('test-session', 'coder');
 
-			const session = getAgentSession('test-session');
-			if (session) {
-				session.warningIssued = true;
-				session.hardLimitHit = true;
+			// Create window via beginInvocation
+			beginInvocation('test-session', 'coder');
+			const window = getActiveWindow('test-session');
+			if (window) {
+				window.warningIssued = true;
+				window.hardLimitHit = true;
 			}
 
 			const messages = [{
@@ -477,8 +497,8 @@ describe('guardrails circuit breaker', () => {
 				await hooks.toolBefore(makeInput('test-session'), makeOutput({ index: i }));
 			}
 
-			const session = getAgentSession('test-session');
-			expect(session?.recentToolCalls.length).toBe(20);
+			const window = getActiveWindow('test-session');
+			expect(window?.recentToolCalls.length).toBe(20);
 		});
 	});
 
@@ -606,8 +626,8 @@ describe('guardrails circuit breaker', () => {
 					makeOutput({ arg: i }),
 				);
 			}
-			const coderSession = getAgentSession('coder-session');
-			expect(coderSession?.warningIssued).toBe(false);
+			const coderWindow = getActiveWindow('coder-session');
+			expect(coderWindow?.warningIssued).toBe(false);
 
 			// Explorer session - has built-in threshold of 0.75, max_tool_calls of 150
 			// Warning at: 150 * 0.75 = 112.5 calls, so we need 113+ calls to trigger warning
@@ -618,8 +638,8 @@ describe('guardrails circuit breaker', () => {
 					makeOutput({ arg: i }),
 				);
 			}
-			const explorerSession = getAgentSession('explorer-session');
-			expect(explorerSession?.warningIssued).toBe(true);
+			const explorerWindow = getActiveWindow('explorer-session');
+			expect(explorerWindow?.warningIssued).toBe(true);
 		});
 
 		it('profile with max_consecutive_errors override works', async () => {
@@ -633,9 +653,11 @@ describe('guardrails circuit breaker', () => {
 
 			// Create tester session with 2 consecutive errors
 			startAgentSession('tester-session', 'tester');
-			const testerSession = getAgentSession('tester-session');
-			if (testerSession) {
-				testerSession.consecutiveErrors = 2;
+			// First call creates the window
+			await hooks.toolBefore(makeInput('tester-session', 'tool-0', 'call-0'), makeOutput({ arg: 0 }));
+			const testerWindow = getActiveWindow('tester-session');
+			if (testerWindow) {
+				testerWindow.consecutiveErrors = 2;
 			}
 
 			// Next tool call should throw (tester limit is 2)
@@ -648,9 +670,11 @@ describe('guardrails circuit breaker', () => {
 
 			// But explorer session with 2 errors should be fine
 			startAgentSession('explorer-session', 'explorer');
-			const explorerSession = getAgentSession('explorer-session');
-			if (explorerSession) {
-				explorerSession.consecutiveErrors = 2;
+			// First call creates the window
+			await hooks.toolBefore(makeInput('explorer-session', 'tool-0', 'call-0'), makeOutput({ arg: 0 }));
+			const explorerWindow = getActiveWindow('explorer-session');
+			if (explorerWindow) {
+				explorerWindow.consecutiveErrors = 2;
 			}
 
 			// Next tool call should NOT throw (explorer limit is 5, uses base config)
@@ -719,12 +743,13 @@ describe('guardrails circuit breaker', () => {
 			const hooks = createGuardrailsHooks(config);
 			startAgentSession('test-session', 'unknown');
 
-			// Set start time to 500 minutes ago
-			const session = getAgentSession('test-session');
-			if (session) {
-				session.startTime = Date.now() - 500 * 60000;
-				// Keep lastSuccessTime recent to avoid idle timeout
-				session.lastSuccessTime = Date.now();
+			// First call creates the window
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+			const window = getActiveWindow('test-session');
+			if (window) {
+				window.startedAtMs = Date.now() - 500 * 60000;
+				// Keep lastSuccessTimeMs recent to avoid idle timeout
+				window.lastSuccessTimeMs = Date.now();
 			}
 
 			// Should NOT throw — duration is unlimited
@@ -736,17 +761,19 @@ describe('guardrails circuit breaker', () => {
 			const hooks = createGuardrailsHooks(config);
 			startAgentSession('test-session', 'unknown');
 
-			const session = getAgentSession('test-session');
-			if (session) {
-				session.startTime = Date.now() - 100 * 60000;
-				session.lastSuccessTime = Date.now();
+			// First call creates the window
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+			const window = getActiveWindow('test-session');
+			if (window) {
+				window.startedAtMs = Date.now() - 100 * 60000;
+				window.lastSuccessTimeMs = Date.now();
 			}
 
 			await hooks.toolBefore(makeInput('test-session'), makeOutput());
 
-			const updatedSession = getAgentSession('test-session');
+			const updatedWindow = getActiveWindow('test-session');
 			// Warning should NOT be issued for duration (other limits may warn)
-			expect(updatedSession?.warningIssued).toBe(false);
+			expect(updatedWindow?.warningIssued).toBe(false);
 		});
 
 		it('architect profile has unlimited duration by default', async () => {
@@ -757,11 +784,12 @@ describe('guardrails circuit breaker', () => {
 			swarmState.activeAgent.set('arch-session', 'architect');
 			startAgentSession('arch-session', 'architect');
 
-			// Set start time to 200 minutes ago (way beyond old 90 min limit)
-			const session = getAgentSession('arch-session');
-			if (session) {
-				session.startTime = Date.now() - 200 * 60000;
-				session.lastSuccessTime = Date.now();
+			// First call creates the window
+			await hooks.toolBefore(makeInput('arch-session'), makeOutput());
+			const window = getActiveWindow('arch-session');
+			if (window) {
+				window.startedAtMs = Date.now() - 200 * 60000;
+				window.lastSuccessTimeMs = Date.now();
 			}
 
 			// Should NOT throw — architect has max_duration_minutes: 0 (unlimited)
@@ -777,10 +805,13 @@ describe('guardrails circuit breaker', () => {
 			// Step 1: Start as critic with tight duration limit
 			swarmState.activeAgent.set('shared-session', 'critic');
 			startAgentSession('shared-session', 'critic');
-			const session = getAgentSession('shared-session');
-			if (session) {
-				session.startTime = Date.now() - 35 * 60000; // 35 min ago
-				session.lastSuccessTime = Date.now();
+
+			// First call creates the window
+			await hooks.toolBefore(makeInput('shared-session'), makeOutput());
+			const window = getActiveWindow('shared-session');
+			if (window) {
+				window.startedAtMs = Date.now() - 35 * 60000; // 35 min ago
+				window.lastSuccessTimeMs = Date.now();
 			}
 
 			// Step 2: Verify critic session throws due to duration
@@ -789,8 +820,8 @@ describe('guardrails circuit breaker', () => {
 			).rejects.toThrow('Duration exhausted');
 
 			// Step 3: Clear hard limit and switch active agent to architect
-			if (session) {
-				session.hardLimitHit = false;
+			if (window) {
+				window.hardLimitHit = false;
 			}
 			swarmState.activeAgent.set('shared-session', 'architect');
 
@@ -822,33 +853,36 @@ describe('guardrails circuit breaker', () => {
 				);
 			}
 
-			const session = getAgentSession('test-session');
-			expect(session?.toolCallCount).toBe(1000);
-			expect(session?.hardLimitHit).toBe(false);
+			const window = getActiveWindow('test-session');
+			// Unknown agent is tracked but max_tool_calls=0 means unlimited
+			expect(window?.toolCalls).toBe(1000);
+			expect(window?.hardLimitHit).toBe(false);
 		});
 
 		it('does not issue tool call warning when max_tool_calls is 0', async () => {
 			const config = defaultConfig({
 				max_tool_calls: 0,
 				warning_threshold: 0.1,
-				max_duration_minutes: 0, // Also unlimited to avoid duration warning
+				max_duration_minutes: 30, // Use normal duration limit (not 0, which would exempt the agent)
 				idle_timeout_minutes: 1000, // High to avoid idle warning
 				max_repetitions: 1000, // High to avoid repetition warning
 			});
 			const hooks = createGuardrailsHooks(config);
 			startAgentSession('test-session', 'unknown');
 
-			// Make many calls with different tools/args to avoid repetition detection
-			for (let i = 0; i < 100; i++) {
-				await hooks.toolBefore(
-					makeInput('test-session', `tool-${i}`, `call-${i}`),
-					makeOutput({ index: i }),
-				);
-			}
+			// Make one call to create the window
+			await hooks.toolBefore(
+				makeInput('test-session', 'tool-0', 'call-0'),
+				makeOutput({ index: 0 }),
+			);
+			await hooks.toolAfter(
+				makeInput('test-session', 'tool-0', 'call-0'),
+				makeAfterOutput('success'),
+			);
 
-			const session = getAgentSession('test-session');
-			// Warning should NOT be issued for tool calls (max_tool_calls=0 means unlimited)
-			expect(session?.warningIssued).toBe(false);
+			const window = getActiveWindow('test-session');
+			// Unknown agent is tracked but max_tool_calls=0 means unlimited (no warning)
+			expect(window?.warningIssued).toBe(false);
 		});
 
 		it('architect profile has unlimited tool calls by default', async () => {
@@ -878,10 +912,11 @@ describe('guardrails circuit breaker', () => {
 			const hooks = createGuardrailsHooks(config);
 			startAgentSession('test-session', 'unknown');
 
-			// Set lastSuccessTime to 31 minutes ago
-			const session = getAgentSession('test-session');
-			if (session) {
-				session.lastSuccessTime = Date.now() - 31 * 60000;
+			// First call creates the window
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+			const window = getActiveWindow('test-session');
+			if (window) {
+				window.lastSuccessTimeMs = Date.now() - 31 * 60000;
 			}
 
 			await expect(hooks.toolBefore(makeInput('test-session'), makeOutput()))
@@ -893,7 +928,7 @@ describe('guardrails circuit breaker', () => {
 			const hooks = createGuardrailsHooks(config);
 			startAgentSession('test-session', 'unknown');
 
-			// lastSuccessTime is set to now by startAgentSession, so should be fine
+			// lastSuccessTimeMs is set to now by startAgentSession, so should be fine
 			await hooks.toolBefore(makeInput('test-session'), makeOutput());
 		});
 
@@ -902,10 +937,11 @@ describe('guardrails circuit breaker', () => {
 			const hooks = createGuardrailsHooks(config);
 			startAgentSession('test-session', 'unknown');
 
-			// Set lastSuccessTime to 29 minutes ago (close but not exceeded)
-			const session = getAgentSession('test-session');
-			if (session) {
-				session.lastSuccessTime = Date.now() - 29 * 60000;
+			// First call creates the window
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+			const window = getActiveWindow('test-session');
+			if (window) {
+				window.lastSuccessTimeMs = Date.now() - 29 * 60000;
 			}
 
 			// Should not throw
@@ -915,59 +951,64 @@ describe('guardrails circuit breaker', () => {
 			await hooks.toolAfter(makeInput('test-session'), { title: 'Result', output: 'success', metadata: {} });
 
 			// Now set the time again — it should have been reset by toolAfter
-			const updatedSession = getAgentSession('test-session');
-			expect(updatedSession?.lastSuccessTime).toBeGreaterThan(Date.now() - 1000);
+			const updatedWindow = getActiveWindow('test-session');
+			expect(updatedWindow?.lastSuccessTimeMs).toBeGreaterThan(Date.now() - 1000);
 		});
 	});
 
-	describe('toolAfter - lastSuccessTime tracking', () => {
-		it('updates lastSuccessTime on success', async () => {
+	describe('toolAfter - lastSuccessTimeMs tracking', () => {
+		it('updates lastSuccessTimeMs on success', async () => {
 			const config = defaultConfig();
 			const hooks = createGuardrailsHooks(config);
 			startAgentSession('test-session', 'coder');
 
-			// Set lastSuccessTime to old time
-			const session = getAgentSession('test-session');
-			if (session) {
-				session.lastSuccessTime = Date.now() - 60000;
+			// First call creates the window
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+			const window = getActiveWindow('test-session');
+			if (window) {
+				window.lastSuccessTimeMs = Date.now() - 60000;
 			}
 
 			const beforeTime = Date.now();
 			await hooks.toolAfter(makeInput('test-session'), { title: 'Result', output: 'success', metadata: {} });
 
-			expect(session?.lastSuccessTime).toBeGreaterThanOrEqual(beforeTime);
+			expect(window?.lastSuccessTimeMs).toBeGreaterThanOrEqual(beforeTime);
 		});
 
-		it('does not update lastSuccessTime on null output', async () => {
+		it('does not update lastSuccessTimeMs on null output', async () => {
 			const config = defaultConfig();
 			const hooks = createGuardrailsHooks(config);
 			startAgentSession('test-session', 'coder');
 
+			// First call creates the window
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+			const window = getActiveWindow('test-session');
 			const oldTime = Date.now() - 60000;
-			const session = getAgentSession('test-session');
-			if (session) {
-				session.lastSuccessTime = oldTime;
+			if (window) {
+				window.lastSuccessTimeMs = oldTime;
 			}
 
 			await hooks.toolAfter(makeInput('test-session'), { title: 'Result', output: null as unknown as string, metadata: {} });
 
-			expect(session?.lastSuccessTime).toBe(oldTime);
+			expect(window?.lastSuccessTimeMs).toBe(oldTime);
 		});
 
-		it('does not update lastSuccessTime on undefined output', async () => {
+		it('does not update lastSuccessTimeMs on undefined output', async () => {
 			const config = defaultConfig();
 			const hooks = createGuardrailsHooks(config);
 			startAgentSession('test-session', 'coder');
 
+			// First call creates the window
+			await hooks.toolBefore(makeInput('test-session'), makeOutput());
+			const window = getActiveWindow('test-session');
 			const oldTime = Date.now() - 60000;
-			const session = getAgentSession('test-session');
-			if (session) {
-				session.lastSuccessTime = oldTime;
+			if (window) {
+				window.lastSuccessTimeMs = oldTime;
 			}
 
 			await hooks.toolAfter(makeInput('test-session'), { title: 'Result', output: undefined as unknown as string, metadata: {} });
 
-			expect(session?.lastSuccessTime).toBe(oldTime);
+			expect(window?.lastSuccessTimeMs).toBe(oldTime);
 		});
 	});
 
@@ -1002,11 +1043,12 @@ describe('guardrails circuit breaker', () => {
 			swarmState.activeAgent.set('architect-session', 'architect');
 			startAgentSession('architect-session', 'architect');
 
-			// Set startTime to 60 minutes ago
-			const session = getAgentSession('architect-session');
-			if (session) {
-				session.startTime = Date.now() - 60 * 60000;
-				session.lastSuccessTime = Date.now();
+			// First call creates the window
+			await hooks.toolBefore(makeInput('architect-session'), makeOutput());
+			const window = getActiveWindow('architect-session');
+			if (window) {
+				window.startedAtMs = Date.now() - 60 * 60000;
+				window.lastSuccessTimeMs = Date.now();
 			}
 
 			// Should NOT throw despite being 60 minutes old
@@ -1233,16 +1275,17 @@ describe('guardrails circuit breaker', () => {
 			swarmState.activeAgent.set('delegation-ended-session', 'coder');
 			startAgentSession('delegation-ended-session', 'coder');
 
-			// Manually set startTime to 31 minutes ago (exceeds duration limit)
-			const coderSession = getAgentSession('delegation-ended-session');
-			if (coderSession) {
-				coderSession.startTime = Date.now() - 31 * 60000;
-				coderSession.lastSuccessTime = Date.now() - 31 * 60000;
+			// First call creates the window
+			await hooks.toolBefore(makeInput('delegation-ended-session', 'read', 'call-1'), makeOutput());
+			const window = getActiveWindow('delegation-ended-session');
+			if (window) {
+				window.startedAtMs = Date.now() - 31 * 60000;
+				window.lastSuccessTimeMs = Date.now() - 31 * 60000;
 			}
 
 			// Verify coder session would throw due to duration limit
 			await expect(
-				hooks.toolBefore(makeInput('delegation-ended-session', 'read', 'call-1'), makeOutput()),
+				hooks.toolBefore(makeInput('delegation-ended-session', 'read', 'call-2'), makeOutput()),
 			).rejects.toThrow('Duration exhausted');
 
 			// Step 2: Delegation ends - simulate input.agent missing/empty

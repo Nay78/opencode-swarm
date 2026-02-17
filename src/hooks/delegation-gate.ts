@@ -7,6 +7,7 @@
 
 import type { PluginConfig } from '../config';
 import { stripKnownSwarmPrefix } from '../config/schema';
+import { swarmState } from '../state';
 
 interface MessageInfo {
 	role: string;
@@ -127,6 +128,43 @@ export function createDelegationGateHook(
 			warnings.push(
 				'Batching language detected. Break compound objectives into separate coder calls.',
 			);
+		}
+
+		// Check for protocol violation: coder → coder without reviewer/test_engineer
+		const sessionID = lastUserMessage.info?.sessionID;
+		if (sessionID) {
+			const delegationChain = swarmState.delegationChains.get(sessionID);
+			if (delegationChain && delegationChain.length >= 2) {
+				// Find the two most recent coder delegations
+				const coderIndices: number[] = [];
+				for (let i = delegationChain.length - 1; i >= 0; i--) {
+					if (stripKnownSwarmPrefix(delegationChain[i].to).includes('coder')) {
+						coderIndices.unshift(i);
+						if (coderIndices.length === 2) break;
+					}
+				}
+
+				// Only check if there are at least 2 coder delegations (previous + current)
+				if (coderIndices.length === 2) {
+					const prevCoderIndex = coderIndices[0];
+					// Check between previous coder and end of chain for reviewer and test_engineer
+					const betweenCoders = delegationChain.slice(prevCoderIndex + 1);
+					const hasReviewer = betweenCoders.some(
+						(d) => stripKnownSwarmPrefix(d.to) === 'reviewer',
+					);
+					const hasTestEngineer = betweenCoders.some(
+						(d) => stripKnownSwarmPrefix(d.to) === 'test_engineer',
+					);
+
+					if (!hasReviewer || !hasTestEngineer) {
+						warnings.push(
+							`⚠️ PROTOCOL VIOLATION: Previous coder task completed, but QA gate was skipped. ` +
+								`You MUST delegate to reviewer (code review) and test_engineer (test execution) ` +
+								`before starting a new coder task. Review RULES 7-8 in your system prompt.`,
+						);
+					}
+				}
+			}
 		}
 
 		// If no warnings, return

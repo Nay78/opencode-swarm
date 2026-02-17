@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/version-5.1.5-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-5.2.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   <img src="https://img.shields.io/badge/opencode-plugin-purple" alt="OpenCode Plugin">
   <img src="https://img.shields.io/badge/agents-7-orange" alt="Agents">
-  <img src="https://img.shields.io/badge/tests-1034-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1101-brightgreen" alt="Tests">
 </p>
 
 <h1 align="center">🐝 OpenCode Swarm</h1>
@@ -334,6 +334,12 @@ bunx opencode-swarm uninstall --clean
 
 ## What's New
 
+### v5.2.0 — Per-Invocation Guardrails
+- **Per-invocation budget isolation** — Guardrail limits (tool calls, duration, errors) now reset with each agent delegation. Second invocation of the same agent gets a fresh budget, preventing false circuit breaker trips in long-running projects.
+- **Architect protocol enforcement** — New mandatory QA gate rules: every coder task must go through reviewer approval + test_engineer verification before the next coder task. Protocol violations detected at runtime with warning injection.
+- **Invocation window observability** — Circuit breaker logs now include `invocationId` and `windowKey` for precise debugging of which specific agent invocation hit limits.
+- **67 new tests** — 1101 total tests across 48 files (up from 1034 in v5.1.x).
+
 ### v5.0.0 — Verifiable Execution
 - **Canonical plan schema** — Machine-readable `plan.json` with Zod-validated `PlanSchema`/`TaskSchema`/`PhaseSchema`. Automatic migration from legacy `plan.md` format. Structured status tracking (`pending`, `in_progress`, `completed`, `blocked`).
 - **Evidence bundles** — Per-task execution evidence persisted to `.swarm/evidence/`. Five evidence types: `review`, `test`, `diff`, `approval`, `note`. Sanitized task IDs, atomic writes, configurable size limits. `/swarm evidence` to view, `/swarm archive` to manage retention.
@@ -512,6 +518,18 @@ Profiles merge with base config — only specified fields are overridden.
 
 > **Architect is exempt/unlimited by default:** The architect agent has no guardrail limits by default. To override, add a `profiles.architect` entry in your guardrails config.
 
+### Per-Invocation Budgets
+
+Guardrail limits are enforced **per-invocation**, not per-session. Each time the architect delegates to an agent, that agent gets a fresh budget of tool calls, duration, and error tolerance.
+
+**Example**: If `max_tool_calls: 200`, then:
+- Architect → Coder (task 1) → 200 calls available
+- Coder finishes → Architect → Coder (task 2) → 200 calls available again
+
+This prevents long-running projects from accumulating session-wide counters that incorrectly trip the circuit breaker on later tasks.
+
+> **Architect is unlimited**: The architect never creates invocation windows and has no guardrail limits by default.
+
 ### Disable Guardrails
 
 ```json
@@ -564,7 +582,7 @@ bun test
 bun test tests/unit/config/schema.test.ts
 ```
 
-1034 tests across 45 files covering config, tools, agents, hooks, commands, state, guardrails, evidence, plan schemas, and circuit breaker race conditions. Uses Bun's built-in test runner — zero additional test dependencies.
+1101 tests across 48 files covering config, tools, agents, hooks, commands, state, guardrails, evidence, plan schemas, circuit breaker race conditions, invocation windows, and multi-invocation isolation. Uses Bun's built-in test runner — zero additional test dependencies.
 
 ## Troubleshooting
 

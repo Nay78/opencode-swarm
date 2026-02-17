@@ -7,6 +7,9 @@
  * and delegation chains.
  */
 
+import { ORCHESTRATOR_NAME } from './config/constants';
+import { stripKnownSwarmPrefix } from './config/schema';
+
 /**
  * Represents a single tool call entry for tracking purposes
  */
@@ -38,44 +41,55 @@ export interface DelegationEntry {
 }
 
 /**
- * Represents per-session state for guardrail tracking
+ * Represents per-session state for guardrail tracking.
+ * Budget fields (toolCallCount, consecutiveErrors, etc.) have moved to InvocationWindow.
+ * This interface now tracks session-level metadata and window management.
  */
 export interface AgentSessionState {
-	/** Which agent this session belongs to */
+	/** Current agent identity for this session */
 	agentName: string;
-
-	/** Date.now() when session started */
-	startTime: number;
-
-	/** Timestamp of most recent tool call (for stale session eviction) */
+	/** Timestamp of most recent tool call (for session-level stale detection) */
 	lastToolCallTime: number;
-
-	/** Timestamp of most recent agent identity event (chat.message sets/changes identity) */
+	/** Timestamp of most recent agent identity event (chat.message) */
 	lastAgentEventTime: number;
-
-	/** Total tool calls in this session */
-	toolCallCount: number;
-
-	/** Consecutive errors (reset on success) */
-	consecutiveErrors: number;
-
-	/** Circular buffer of recent tool calls, max 20 entries */
-	recentToolCalls: Array<{ tool: string; argsHash: number; timestamp: number }>;
-
-	/** Whether a soft warning has been issued */
-	warningIssued: boolean;
-
-	/** Human-readable warning reason (set when warningIssued = true) */
-	warningReason: string;
-
-	/** Whether a hard limit has been triggered */
-	hardLimitHit: boolean;
-
-	/** Timestamp of most recent SUCCESSFUL tool call (for idle timeout) */
-	lastSuccessTime: number;
-
 	/** Whether active delegation is in progress for this session */
 	delegationActive: boolean;
+
+	// Window tracking (per-invocation budgets)
+	/** Current active invocation ID for this agent */
+	activeInvocationId: number;
+	/** Last invocation ID by agent name (e.g., { "coder": 3, "reviewer": 1 }) */
+	lastInvocationIdByAgent: Record<string, number>;
+	/** Active invocation windows keyed by "${agentName}:${invId}" */
+	windows: Record<string, InvocationWindow>;
+}
+
+/**
+ * Represents a single agent invocation window with isolated guardrail budgets.
+ * Each time the architect delegates to an agent, a new window is created.
+ * Architect never creates windows (unlimited).
+ */
+export interface InvocationWindow {
+	/** Unique ID for this invocation (increments per agent type) */
+	id: number;
+	/** Agent name (stripped of swarm prefix) */
+	agentName: string;
+	/** Timestamp when this invocation started */
+	startedAtMs: number;
+	/** Tool calls made in this invocation */
+	toolCalls: number;
+	/** Consecutive errors in this invocation */
+	consecutiveErrors: number;
+	/** Whether hard limit was hit for this invocation */
+	hardLimitHit: boolean;
+	/** Timestamp of most recent successful tool call */
+	lastSuccessTimeMs: number;
+	/** Circular buffer of recent tool calls (max 20) for repetition detection */
+	recentToolCalls: Array<{ tool: string; argsHash: number; timestamp: number }>;
+	/** Whether soft warning has been issued for this invocation */
+	warningIssued: boolean;
+	/** Human-readable warning reason */
+	warningReason: string;
 }
 
 /**
@@ -142,17 +156,12 @@ export function startAgentSession(
 	// Create new session state
 	const sessionState: AgentSessionState = {
 		agentName,
-		startTime: now,
 		lastToolCallTime: now,
 		lastAgentEventTime: now,
-		toolCallCount: 0,
-		consecutiveErrors: 0,
-		recentToolCalls: [],
-		warningIssued: false,
-		warningReason: '',
-		hardLimitHit: false,
-		lastSuccessTime: now,
 		delegationActive: false,
+		activeInvocationId: 0,
+		lastInvocationIdByAgent: {},
+		windows: {},
 	};
 
 	swarmState.agentSessions.set(sessionId, sessionState);
@@ -197,21 +206,24 @@ export function ensureAgentSession(
 		// Update agent name if provided and different from current
 		if (agentName && agentName !== session.agentName) {
 			session.agentName = agentName;
-			// Reset start time for accurate duration tracking with correct agent limits
-			session.startTime = now;
-			// Reset per-agent guardrail state to prevent limits leaking across agents
-			session.toolCallCount = 0;
-			session.consecutiveErrors = 0;
-			session.recentToolCalls = [];
-			session.warningIssued = false;
-			session.warningReason = '';
-			session.hardLimitHit = false;
-			session.lastSuccessTime = now;
-			// Reset delegation state on agent switch
 			session.delegationActive = false;
-			// Update agent event timestamp for stale detection
 			session.lastAgentEventTime = now;
+
+			// Initialize window tracking if missing (migration from old state)
+			if (!session.windows) {
+				session.activeInvocationId = 0;
+				session.lastInvocationIdByAgent = {};
+				session.windows = {};
+			}
 		}
+
+		// Ensure window tracking exists (migration safety)
+		if (!session.windows) {
+			session.activeInvocationId = 0;
+			session.lastInvocationIdByAgent = {};
+			session.windows = {};
+		}
+
 		session.lastToolCallTime = now;
 		return session;
 	}
@@ -236,4 +248,114 @@ export function updateAgentEventTime(sessionId: string): void {
 	if (session) {
 		session.lastAgentEventTime = Date.now();
 	}
+}
+
+/**
+ * Begin a new invocation window for the given agent.
+ * Increments invocation ID, creates fresh budget counters.
+ * Returns null for architect (unlimited, no window).
+ *
+ * @param sessionId - Session identifier
+ * @param agentName - Agent name (with or without swarm prefix)
+ * @returns New window or null if architect
+ */
+export function beginInvocation(
+	sessionId: string,
+	agentName: string,
+): InvocationWindow | null {
+	const session = swarmState.agentSessions.get(sessionId);
+	if (!session) {
+		throw new Error(
+			`Cannot begin invocation: session ${sessionId} does not exist`,
+		);
+	}
+
+	// Architect never creates windows (unlimited)
+	const stripped = stripKnownSwarmPrefix(agentName);
+	if (stripped === ORCHESTRATOR_NAME) {
+		return null;
+	}
+
+	// Increment invocation ID for this agent
+	const lastId = session.lastInvocationIdByAgent[stripped] || 0;
+	const newId = lastId + 1;
+	session.lastInvocationIdByAgent[stripped] = newId;
+	session.activeInvocationId = newId;
+
+	// Create new window
+	const now = Date.now();
+	const window: InvocationWindow = {
+		id: newId,
+		agentName: stripped,
+		startedAtMs: now,
+		toolCalls: 0,
+		consecutiveErrors: 0,
+		hardLimitHit: false,
+		lastSuccessTimeMs: now,
+		recentToolCalls: [],
+		warningIssued: false,
+		warningReason: '',
+	};
+
+	const key = `${stripped}:${newId}`;
+	session.windows[key] = window;
+
+	// Prune old windows to prevent memory leak
+	pruneOldWindows(sessionId, 24 * 60 * 60 * 1000, 50); // 24h max age, 50 max windows
+
+	return window;
+}
+
+/**
+ * Get the currently active invocation window for the session.
+ * Returns undefined if no window exists (e.g., architect session).
+ *
+ * @param sessionId - Session identifier
+ * @returns Active window or undefined
+ */
+export function getActiveWindow(
+	sessionId: string,
+): InvocationWindow | undefined {
+	const session = swarmState.agentSessions.get(sessionId);
+	if (!session || !session.windows) {
+		return undefined;
+	}
+
+	const stripped = stripKnownSwarmPrefix(session.agentName);
+	const key = `${stripped}:${session.activeInvocationId}`;
+	return session.windows[key];
+}
+
+/**
+ * Prune old invocation windows to prevent unbounded memory growth.
+ * Removes windows older than maxAgeMs and keeps only the most recent maxWindows.
+ *
+ * @param sessionId - Session identifier
+ * @param maxAgeMs - Maximum age in milliseconds (default 24 hours)
+ * @param maxWindows - Maximum number of windows to keep (default 50)
+ */
+export function pruneOldWindows(
+	sessionId: string,
+	maxAgeMs = 24 * 60 * 60 * 1000,
+	maxWindows = 50,
+): void {
+	const session = swarmState.agentSessions.get(sessionId);
+	if (!session || !session.windows) {
+		return;
+	}
+
+	const now = Date.now();
+	const entries = Object.entries(session.windows);
+
+	// Remove windows older than maxAgeMs
+	const validByAge = entries.filter(
+		([_, window]) => now - window.startedAtMs < maxAgeMs,
+	);
+
+	// Sort by timestamp descending, keep most recent maxWindows
+	const sorted = validByAge.sort((a, b) => b[1].startedAtMs - a[1].startedAtMs);
+	const toKeep = sorted.slice(0, maxWindows);
+
+	// Rebuild windows object
+	session.windows = Object.fromEntries(toKeep);
 }

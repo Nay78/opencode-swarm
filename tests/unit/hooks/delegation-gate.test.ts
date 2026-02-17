@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, afterEach } from 'bun:test';
 import { createDelegationGateHook } from '../../../src/hooks/delegation-gate';
+import { swarmState } from '../../../src/state';
 import type { PluginConfig } from '../../../src/config';
 
 function makeConfig(overrides?: Record<string, unknown>): PluginConfig {
@@ -30,6 +31,10 @@ function makeMessages(text: string, agent?: string) {
 }
 
 describe('delegation gate hook', () => {
+	afterEach(() => {
+		swarmState.delegationChains.clear();
+	});
+
 	it('no-op when disabled', async () => {
 		const config = makeConfig({ hooks: { delegation_gate: false } });
 		const hook = createDelegationGateHook(config);
@@ -161,5 +166,70 @@ describe('delegation gate hook', () => {
 
 		expect(messages.messages[0].parts[0].text).toContain('⚠️ DELEGATION GATE');
 		expect(messages.messages[0].parts[0].text).toContain('limit 100');
+	});
+
+	it('should warn when coder delegates to coder without reviewer', async () => {
+		const config = makeConfig();
+		const hook = createDelegationGateHook(config);
+
+		// Simulate delegation chain: architect → coder → architect → (now delegating to coder again)
+		swarmState.delegationChains.set('test-session', [
+			{ from: 'architect', to: 'mega_coder', timestamp: Date.now() - 5000 },
+			{ from: 'mega_coder', to: 'architect', timestamp: Date.now() - 3000 },
+			{ from: 'architect', to: 'mega_coder', timestamp: Date.now() - 1000 },
+		]);
+
+		const messages = makeMessages('coder\nTASK: Implement feature B\nFILE: src/b.ts', 'architect');
+
+		await hook({}, messages);
+
+		expect(messages.messages[0].parts[0].text).toContain('PROTOCOL VIOLATION');
+		expect(messages.messages[0].parts[0].text).toContain('reviewer');
+		expect(messages.messages[0].parts[0].text).toContain('test_engineer');
+	});
+
+	it('should NOT warn when proper QA sequence is followed', async () => {
+		const config = makeConfig();
+		const hook = createDelegationGateHook(config);
+
+		// Proper sequence: coder → architect → reviewer → architect → test_engineer → architect → coder
+		swarmState.delegationChains.set('test-session', [
+			{ from: 'architect', to: 'mega_coder', timestamp: Date.now() - 10000 },
+			{ from: 'mega_coder', to: 'architect', timestamp: Date.now() - 8000 },
+			{ from: 'architect', to: 'mega_reviewer', timestamp: Date.now() - 6000 },
+			{ from: 'mega_reviewer', to: 'architect', timestamp: Date.now() - 4000 },
+			{ from: 'architect', to: 'mega_test_engineer', timestamp: Date.now() - 2000 },
+			{ from: 'mega_test_engineer', to: 'architect', timestamp: Date.now() - 1000 },
+			{ from: 'architect', to: 'mega_coder', timestamp: Date.now() },
+		]);
+
+		const cleanText = 'coder\nTASK: Next task\nFILE: src/next.ts';
+		const messages = makeMessages(cleanText, 'architect');
+		const originalText = messages.messages[0].parts[0].text;
+
+		await hook({}, messages);
+
+		// No PROTOCOL VIOLATION warning should be added
+		expect(messages.messages[0].parts[0].text).not.toContain('PROTOCOL VIOLATION');
+	});
+
+	it('should warn when reviewer present but test_engineer missing', async () => {
+		const config = makeConfig();
+		const hook = createDelegationGateHook(config);
+
+		// Chain: coder → arch → reviewer → arch → coder (no test_engineer)
+		swarmState.delegationChains.set('test-session', [
+			{ from: 'architect', to: 'mega_coder', timestamp: Date.now() - 5000 },
+			{ from: 'mega_coder', to: 'architect', timestamp: Date.now() - 4000 },
+			{ from: 'architect', to: 'mega_reviewer', timestamp: Date.now() - 3000 },
+			{ from: 'mega_reviewer', to: 'architect', timestamp: Date.now() - 2000 },
+			{ from: 'architect', to: 'mega_coder', timestamp: Date.now() - 1000 },
+		]);
+
+		const messages = makeMessages('coder\nTASK: Another task\nFILE: src/another.ts', 'architect');
+
+		await hook({}, messages);
+
+		expect(messages.messages[0].parts[0].text).toContain('PROTOCOL VIOLATION');
 	});
 });

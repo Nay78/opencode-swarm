@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.2.0] - 2026-02-17
+
+### Changed
+- **BREAKING**: Guardrails now enforce per-invocation budgets instead of session-wide. Each agent delegation gets fresh duration/tool-call/error limits. Same-agent re-invocations (e.g., coder → architect → coder) no longer accumulate counters.
+- Architect remains unlimited (no invocation windows created).
+- `AgentSessionState` refactored: budget counters moved to `InvocationWindow` struct.
+
+### Added
+- **Architect protocol enforcement** — New RULES 6-8 mandate critic review before implementation and QA gate (reviewer + test_engineer) after every coder task.
+- Delegation gate hook now detects and warns about protocol violations (coder → coder without QA agents).
+- `beginInvocation()`, `getActiveWindow()`, `pruneOldWindows()` in `src/state.ts`.
+- `InvocationWindow` interface for per-invocation budget tracking.
+- Invocation ID tracking: `lastInvocationIdByAgent` per session.
+- Window pruning: max 50 windows per session, 24h max age.
+- Invocation metadata in circuit breaker logs (`invocationId`, `windowKey`).
+
+### Fixed
+- Circuit breaker no longer trips on second invocation of same agent after 30-minute cumulative session time.
+- Architect no longer drifts into coder loop, skipping reviewer/test_engineer gates.
+
+### Tests
+- 8 new invocation window unit tests in `tests/unit/state-invocation-windows.test.ts`.
+- 2 new multi-invocation integration tests in `tests/integration/circuit-breaker-multi-invocation.test.ts`.
+- 3 new protocol violation tests in `tests/unit/hooks/delegation-gate.test.ts`.
+- Updated all existing guardrails and integration tests for window model.
+- Total: 1101 tests across 48 files.
+
 ## [5.1.8] - 2026-02-16
 
 ### Fixed

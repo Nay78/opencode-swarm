@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { swarmState, resetSwarmState, ToolCallEntry, ToolAggregate, DelegationEntry, startAgentSession, endAgentSession, getAgentSession, ensureAgentSession, updateAgentEventTime } from '../../src/state';
+import { swarmState, resetSwarmState, ToolCallEntry, ToolAggregate, DelegationEntry, startAgentSession, endAgentSession, getAgentSession, ensureAgentSession, updateAgentEventTime, beginInvocation, getActiveWindow, pruneOldWindows, type InvocationWindow } from '../../src/state';
 
 describe('state module', () => {
 	beforeEach(() => {
@@ -405,12 +405,11 @@ describe('state module', () => {
 
 			expect(session).toBeDefined();
 			expect(session?.agentName).toBe('coder');
-			expect(session?.toolCallCount).toBe(0);
-			expect(session?.consecutiveErrors).toBe(0);
-			expect(session?.recentToolCalls).toEqual([]);
-			expect(session?.warningIssued).toBe(false);
-			expect(session?.hardLimitHit).toBe(false);
-			expect(typeof session?.startTime).toBe('number');
+			expect(session?.activeInvocationId).toBe(0);
+			expect(session?.lastInvocationIdByAgent).toEqual({});
+			expect(session?.windows).toEqual({});
+			expect(session?.delegationActive).toBe(false);
+			expect(typeof session?.lastToolCallTime).toBe('number');
 		});
 
 		it('endAgentSession removes entry', () => {
@@ -485,8 +484,8 @@ describe('state module', () => {
 		it('creates new session when none exists', () => {
 			const session = ensureAgentSession('new-session', 'architect');
 			expect(session.agentName).toBe('architect');
-			expect(session.toolCallCount).toBe(0);
-			expect(session.hardLimitHit).toBe(false);
+			expect(session.activeInvocationId).toBe(0);
+			expect(session.windows).toEqual({});
 			expect(session.lastToolCallTime).toBeGreaterThan(0);
 		});
 
@@ -522,56 +521,38 @@ describe('state module', () => {
 		expect(session.agentName).toBe('coder'); // Should change
 	});
 
-	it('resets guardrail state when switching agents', () => {
+	it('updates session metadata when switching agents', () => {
 		// Start with architect
 		const session = ensureAgentSession('test-session', 'architect');
-		session.toolCallCount = 50;
-		session.consecutiveErrors = 3;
-		session.warningIssued = true;
-		session.hardLimitHit = true;
-		session.recentToolCalls = [{ tool: 'read', argsHash: 123, timestamp: Date.now() }];
-		const oldStartTime = session.startTime;
-		const oldLastSuccessTime = session.lastSuccessTime;
-
-		// Small delay to ensure time difference
-		const beforeSwitch = Date.now();
 
 		// Switch to coder
 		ensureAgentSession('test-session', 'coder');
 
-		// All guardrail state should be reset
+		// Session metadata should be updated
 		expect(session.agentName).toBe('coder');
-		expect(session.toolCallCount).toBe(0);
-		expect(session.consecutiveErrors).toBe(0);
-		expect(session.warningIssued).toBe(false);
-		expect(session.hardLimitHit).toBe(false);
-		expect(session.recentToolCalls).toEqual([]);
-		expect(session.warningReason).toBe('');
-		expect(session.startTime).toBeGreaterThanOrEqual(oldStartTime); // Reset to now or later
-		expect(session.lastSuccessTime).toBeGreaterThanOrEqual(beforeSwitch);
+		expect(session.delegationActive).toBe(false);
+		expect(session.windows).toEqual({});
+		expect(session.activeInvocationId).toBe(0);
+		expect(session.lastInvocationIdByAgent).toEqual({});
 	});
 
-	it('resets startTime when updating from unknown', () => {
+	it('initializes window tracking when updating from unknown', () => {
 		const session = ensureAgentSession('test-session'); // unknown
-		const originalStart = session.startTime;
-		session.startTime = originalStart - 60000; // Simulate 1 min elapsed
-
-		ensureAgentSession('test-session', 'architect');
-		expect(session.startTime).toBeGreaterThan(originalStart - 60000); // Reset
-	});
-
-	it('resets startTime and guardrail state when switching from unknown to real agent', () => {
-		const session = ensureAgentSession('test-session'); // unknown
-		session.toolCallCount = 10;
-		session.hardLimitHit = true;
-		const originalStart = session.startTime;
-		session.startTime = originalStart - 60000;
 
 		ensureAgentSession('test-session', 'architect');
 		expect(session.agentName).toBe('architect');
-		expect(session.toolCallCount).toBe(0);
-		expect(session.hardLimitHit).toBe(false);
-		expect(session.startTime).toBeGreaterThan(originalStart - 60000);
+		expect(session.windows).toEqual({});
+		expect(session.activeInvocationId).toBe(0);
+	});
+
+	it('initializes window tracking when switching from unknown to real agent', () => {
+		const session = ensureAgentSession('test-session'); // unknown
+
+		ensureAgentSession('test-session', 'architect');
+		expect(session.agentName).toBe('architect');
+		expect(session.windows).toEqual({});
+		expect(session.activeInvocationId).toBe(0);
+		expect(session.lastInvocationIdByAgent).toEqual({});
 	});
 
 		it('returns same session object for same sessionID', () => {

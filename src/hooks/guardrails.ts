@@ -13,7 +13,12 @@ import {
 	resolveGuardrailsConfig,
 	stripKnownSwarmPrefix,
 } from '../config/schema';
-import { ensureAgentSession, getAgentSession, swarmState } from '../state';
+import {
+	beginInvocation,
+	ensureAgentSession,
+	getActiveWindow,
+	swarmState,
+} from '../state';
 import { warn } from '../utils';
 
 /**
@@ -67,8 +72,6 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 			}
 
 			// Check 2: Fallback to session state if activeAgent is missing/undefined
-			// This handles cases where tool.execute.before fires before chat.message updates activeAgent,
-			// or when delegation just ended and activeAgent is transitioning
 			const existingSession = swarmState.agentSessions.get(input.sessionID);
 			if (existingSession) {
 				const sessionAgent = stripKnownSwarmPrefix(existingSession.agentName);
@@ -81,8 +84,7 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 			const agentName = swarmState.activeAgent.get(input.sessionID);
 			const session = ensureAgentSession(input.sessionID, agentName);
 
-			// SECOND exemption check: after session resolution, check if the resolved agent is architect
-			// This catches cases where activeAgent was updated between the first check and session resolution
+			// SECOND exemption check: after session resolution
 			const resolvedName = stripKnownSwarmPrefix(session.agentName);
 			if (resolvedName === ORCHESTRATOR_NAME) {
 				return;
@@ -92,7 +94,6 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 			const agentConfig = resolveGuardrailsConfig(config, session.agentName);
 
 			// FOURTH exemption check: If resolved config shows 0 limits (architect-like), exempt
-			// This is the final safety net for edge cases where name-based checks fail
 			if (
 				agentConfig.max_duration_minutes === 0 &&
 				agentConfig.max_tool_calls === 0
@@ -100,36 +101,53 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 				return;
 			}
 
+			// Fallback: If tool call arrives before delegation-tracker fires, start window
+			if (!getActiveWindow(input.sessionID)) {
+				const fallbackAgent =
+					swarmState.activeAgent.get(input.sessionID) ?? session.agentName;
+				const stripped = stripKnownSwarmPrefix(fallbackAgent);
+				if (stripped !== ORCHESTRATOR_NAME) {
+					beginInvocation(input.sessionID, fallbackAgent);
+				}
+			}
+
+			// Get active window (returns undefined for architect)
+			const window = getActiveWindow(input.sessionID);
+			if (!window) {
+				// Architect or window missing → exempt
+				return;
+			}
+
 			// Check if hard limit was already hit
-			if (session.hardLimitHit) {
+			if (window.hardLimitHit) {
 				throw new Error(
 					'🛑 CIRCUIT BREAKER: Agent blocked. Hard limit was previously triggered. Stop making tool calls and return your progress summary.',
 				);
 			}
 
 			// Increment tool call count
-			session.toolCallCount++;
+			window.toolCalls++;
 
 			// Hash the tool args
 			const hash = hashArgs(output.args);
 
 			// Push to circular buffer (max 20)
-			session.recentToolCalls.push({
+			window.recentToolCalls.push({
 				tool: input.tool,
 				argsHash: hash,
 				timestamp: Date.now(),
 			});
-			if (session.recentToolCalls.length > 20) {
-				session.recentToolCalls.shift();
+			if (window.recentToolCalls.length > 20) {
+				window.recentToolCalls.shift();
 			}
 
 			// Count consecutive repetitions from the end
 			let repetitionCount = 0;
-			if (session.recentToolCalls.length > 0) {
+			if (window.recentToolCalls.length > 0) {
 				const lastEntry =
-					session.recentToolCalls[session.recentToolCalls.length - 1];
-				for (let i = session.recentToolCalls.length - 1; i >= 0; i--) {
-					const entry = session.recentToolCalls[i];
+					window.recentToolCalls[window.recentToolCalls.length - 1];
+				for (let i = window.recentToolCalls.length - 1; i >= 0; i--) {
+					const entry = window.recentToolCalls[i];
 					if (
 						entry.tool === lastEntry.tool &&
 						entry.argsHash === lastEntry.argsHash
@@ -142,22 +160,24 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 			}
 
 			// Compute elapsed minutes
-			const elapsedMinutes = (Date.now() - session.startTime) / 60000;
+			const elapsedMinutes = (Date.now() - window.startedAtMs) / 60000;
 
 			// Check HARD limits (any one triggers circuit breaker)
 			if (
 				agentConfig.max_tool_calls > 0 &&
-				session.toolCallCount >= agentConfig.max_tool_calls
+				window.toolCalls >= agentConfig.max_tool_calls
 			) {
-				session.hardLimitHit = true;
+				window.hardLimitHit = true;
 				warn('Circuit breaker: tool call limit hit', {
 					sessionID: input.sessionID,
-					agentName: session.agentName,
+					agentName: window.agentName,
+					invocationId: window.id,
+					windowKey: `${window.agentName}:${window.id}`,
 					resolvedMaxCalls: agentConfig.max_tool_calls,
-					currentCalls: session.toolCallCount,
+					currentCalls: window.toolCalls,
 				});
 				throw new Error(
-					`🛑 LIMIT REACHED: Tool calls exhausted (${session.toolCallCount}/${agentConfig.max_tool_calls}). Finish the current operation and return your progress summary.`,
+					`🛑 LIMIT REACHED: Tool calls exhausted (${window.toolCalls}/${agentConfig.max_tool_calls}). Finish the current operation and return your progress summary.`,
 				);
 			}
 
@@ -165,10 +185,12 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 				agentConfig.max_duration_minutes > 0 &&
 				elapsedMinutes >= agentConfig.max_duration_minutes
 			) {
-				session.hardLimitHit = true;
+				window.hardLimitHit = true;
 				warn('Circuit breaker: duration limit hit', {
 					sessionID: input.sessionID,
-					agentName: session.agentName,
+					agentName: window.agentName,
+					invocationId: window.id,
+					windowKey: `${window.agentName}:${window.id}`,
 					resolvedMaxMinutes: agentConfig.max_duration_minutes,
 					elapsedMinutes: Math.floor(elapsedMinutes),
 				});
@@ -178,26 +200,28 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 			}
 
 			if (repetitionCount >= agentConfig.max_repetitions) {
-				session.hardLimitHit = true;
+				window.hardLimitHit = true;
 				throw new Error(
 					`🛑 LIMIT REACHED: Repeated the same tool call ${repetitionCount} times. This suggests a loop. Return your progress summary.`,
 				);
 			}
 
-			if (session.consecutiveErrors >= agentConfig.max_consecutive_errors) {
-				session.hardLimitHit = true;
+			if (window.consecutiveErrors >= agentConfig.max_consecutive_errors) {
+				window.hardLimitHit = true;
 				throw new Error(
-					`🛑 LIMIT REACHED: ${session.consecutiveErrors} consecutive tool errors detected. Return your progress summary with details of what went wrong.`,
+					`🛑 LIMIT REACHED: ${window.consecutiveErrors} consecutive tool errors detected. Return your progress summary with details of what went wrong.`,
 				);
 			}
 
 			// Check IDLE timeout — detects agents stuck without successful tool calls
-			const idleMinutes = (Date.now() - session.lastSuccessTime) / 60000;
+			const idleMinutes = (Date.now() - window.lastSuccessTimeMs) / 60000;
 			if (idleMinutes >= agentConfig.idle_timeout_minutes) {
-				session.hardLimitHit = true;
+				window.hardLimitHit = true;
 				warn('Circuit breaker: idle timeout hit', {
 					sessionID: input.sessionID,
-					agentName: session.agentName,
+					agentName: window.agentName,
+					invocationId: window.id,
+					windowKey: `${window.agentName}:${window.id}`,
 					idleTimeoutMinutes: agentConfig.idle_timeout_minutes,
 					idleMinutes: Math.floor(idleMinutes),
 				});
@@ -207,10 +231,10 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 			}
 
 			// Check SOFT limits (only if warning not already issued)
-			if (!session.warningIssued) {
+			if (!window.warningIssued) {
 				const toolPct =
 					agentConfig.max_tool_calls > 0
-						? session.toolCallCount / agentConfig.max_tool_calls
+						? window.toolCalls / agentConfig.max_tool_calls
 						: 0;
 				const durationPct =
 					agentConfig.max_duration_minutes > 0
@@ -218,7 +242,7 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 						: 0;
 				const repPct = repetitionCount / agentConfig.max_repetitions;
 				const errorPct =
-					session.consecutiveErrors / agentConfig.max_consecutive_errors;
+					window.consecutiveErrors / agentConfig.max_consecutive_errors;
 
 				const reasons: string[] = [];
 				if (
@@ -226,7 +250,7 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 					toolPct >= agentConfig.warning_threshold
 				) {
 					reasons.push(
-						`tool calls ${session.toolCallCount}/${agentConfig.max_tool_calls}`,
+						`tool calls ${window.toolCalls}/${agentConfig.max_tool_calls}`,
 					);
 				}
 				if (durationPct >= agentConfig.warning_threshold) {
@@ -241,13 +265,13 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 				}
 				if (errorPct >= agentConfig.warning_threshold) {
 					reasons.push(
-						`errors ${session.consecutiveErrors}/${agentConfig.max_consecutive_errors}`,
+						`errors ${window.consecutiveErrors}/${agentConfig.max_consecutive_errors}`,
 					);
 				}
 
 				if (reasons.length > 0) {
-					session.warningIssued = true;
-					session.warningReason = reasons.join(', ');
+					window.warningIssued = true;
+					window.warningReason = reasons.join(', ');
 				}
 			}
 		},
@@ -256,20 +280,18 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 		 * Tracks tool execution results and updates consecutive error count
 		 */
 		toolAfter: async (input, output) => {
-			const session = getAgentSession(input.sessionID);
-			if (!session) {
-				return;
-			}
+			const window = getActiveWindow(input.sessionID);
+			if (!window) return; // Architect or window missing
 
 			// Check if tool output indicates an error
 			// Only null/undefined output counts as an error — substring matching causes false positives
 			const hasError = output.output === null || output.output === undefined;
 
 			if (hasError) {
-				session.consecutiveErrors++;
+				window.consecutiveErrors++;
 			} else {
-				session.consecutiveErrors = 0;
-				session.lastSuccessTime = Date.now();
+				window.consecutiveErrors = 0;
+				window.lastSuccessTimeMs = Date.now();
 			}
 		},
 
@@ -288,22 +310,28 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 			// Try to determine sessionID from the last message
 			let sessionId: string | undefined = lastMessage.info?.sessionID;
 
-			// If no sessionID in last message, try to find any session with warning/hard limit
-			if (!sessionId) {
-				for (const [id, session] of swarmState.agentSessions) {
-					if (session.warningIssued || session.hardLimitHit) {
+			// Try to find a window with warning/hard limit
+			let targetWindow = sessionId ? getActiveWindow(sessionId) : undefined;
+
+			// If no window found via sessionID, scan all sessions
+			if (
+				!targetWindow ||
+				(!targetWindow.warningIssued && !targetWindow.hardLimitHit)
+			) {
+				for (const [id] of swarmState.agentSessions) {
+					const window = getActiveWindow(id);
+					if (window && (window.warningIssued || window.hardLimitHit)) {
+						targetWindow = window;
 						sessionId = id;
 						break;
 					}
 				}
 			}
 
-			if (!sessionId) {
-				return;
-			}
-
-			const session = getAgentSession(sessionId);
-			if (!session || (!session.warningIssued && !session.hardLimitHit)) {
+			if (
+				!targetWindow ||
+				(!targetWindow.warningIssued && !targetWindow.hardLimitHit)
+			) {
 				return;
 			}
 
@@ -318,13 +346,13 @@ export function createGuardrailsHooks(config: GuardrailsConfig): {
 			}
 
 			// Prepend appropriate message
-			if (session.hardLimitHit) {
+			if (targetWindow.hardLimitHit) {
 				textPart.text =
 					'[🛑 LIMIT REACHED: Your resource budget is exhausted. Do not make additional tool calls. Return a summary of your progress and any remaining work.]\n\n' +
 					textPart.text;
-			} else if (session.warningIssued) {
-				const reasonSuffix = session.warningReason
-					? ` (${session.warningReason})`
+			} else if (targetWindow.warningIssued) {
+				const reasonSuffix = targetWindow.warningReason
+					? ` (${targetWindow.warningReason})`
 					: '';
 				textPart.text =
 					`[⚠️ APPROACHING LIMITS${reasonSuffix}: You still have capacity to finish your current step. Complete what you're working on, then return your results.]\n\n` +

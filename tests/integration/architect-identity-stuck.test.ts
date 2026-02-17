@@ -18,7 +18,9 @@ import type { PluginConfig } from '../../src/config/schema';
 import { createDelegationTrackerHook } from '../../src/hooks/delegation-tracker';
 import { createGuardrailsHooks } from '../../src/hooks/guardrails';
 import {
+	beginInvocation,
 	ensureAgentSession,
+	getActiveWindow,
 	getAgentSession,
 	resetSwarmState,
 	swarmState,
@@ -241,7 +243,9 @@ describe('Architect Identity-Stuck Regression Tests', () => {
 			}
 
 			const archSession = getAgentSession(sessionId);
-			expect(archSession?.hardLimitHit).toBe(false);
+			// Architect has no window (exempt from guardrails)
+			const archWindow = getActiveWindow(sessionId);
+			expect(archWindow).toBeUndefined();
 		});
 	});
 
@@ -305,7 +309,9 @@ describe('Architect Identity-Stuck Regression Tests', () => {
 			swarmState.activeAgent.set(sessionId, 'mega_coder');
 			const session = ensureAgentSession(sessionId, 'mega_coder');
 			session.delegationActive = true;
-			session.toolCallCount = 3;
+			beginInvocation(sessionId, 'mega_coder');
+			const window = getActiveWindow(sessionId)!;
+			window.toolCalls = 3;
 
 			// Make a tool call as coder
 			await guardrailsHooks.toolBefore(
@@ -313,7 +319,7 @@ describe('Architect Identity-Stuck Regression Tests', () => {
 				{ args: { filePath: '/test' } },
 			);
 
-			expect(session.toolCallCount).toBe(4);
+			expect(window.toolCalls).toBe(4);
 
 			// Switch to architect
 			await delegationHook({ sessionID: sessionId, agent: 'architect' }, {});
@@ -321,8 +327,9 @@ describe('Architect Identity-Stuck Regression Tests', () => {
 			// After switching to architect, tool call count should be reset
 			const updatedSession = getAgentSession(sessionId);
 			expect(updatedSession?.agentName).toBe(ORCHESTRATOR_NAME);
-			// The tool call count should be reset when agent switches
-			expect(updatedSession?.toolCallCount).toBe(0);
+			// Architect has no active window (exempt from guardrails)
+			const archWindow = getActiveWindow(sessionId);
+			expect(archWindow).toBeUndefined();
 		});
 
 		it('should correctly strip swarm prefix for agent name resolution', async () => {
@@ -351,9 +358,11 @@ describe('Architect Identity-Stuck Regression Tests', () => {
 			// Test mega_coder -> coder profile resolution
 			swarmState.activeAgent.set(sessionId, 'mega_coder');
 			const session = ensureAgentSession(sessionId, 'mega_coder');
+			beginInvocation(sessionId, 'mega_coder');
+			const window = getActiveWindow(sessionId)!;
 
 			// Should resolve to coder profile (20 min limit)
-			session.startTime = Date.now() - 25 * 60000; // 25 minutes ago
+			window.startedAtMs = Date.now() - 25 * 60000; // 25 minutes ago
 
 			// Should throw because it exceeds coder's 20 min limit
 			await expect(
