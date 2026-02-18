@@ -20,9 +20,9 @@ afterEach(() => {
 
 describe('createAgents', () => {
     describe('no config', () => {
-        it('returns 7 agents', () => {
+        it('returns 8 agents (docs enabled by default, designer opt-in)', () => {
             const agents = createAgents();
-            expect(agents).toHaveLength(7);
+            expect(agents).toHaveLength(8);
         });
 
         it('agent names are correct', () => {
@@ -32,10 +32,12 @@ describe('createAgents', () => {
                 'architect',
                 'coder',
                 'critic',
+                'docs',
                 'explorer',
                 'reviewer',
                 'sme',
                 'test_engineer'
+                // Note: designer is opt-in (ui_review.enabled=true), not included by default
             ]);
         });
 
@@ -103,7 +105,8 @@ describe('createAgents', () => {
             const agents = createAgents(config as unknown as PluginConfig);
             const sme = agents.find(a => a.name === 'sme');
             expect(sme).toBeUndefined();
-            expect(agents).toHaveLength(6);
+            // 8 agents - 1 disabled = 7 agents (docs still included by default)
+            expect(agents).toHaveLength(7);
         });
     });
 
@@ -121,10 +124,12 @@ describe('createAgents', () => {
                 'architect',
                 'coder',
                 'critic',
+                'docs',
                 'explorer',
                 'reviewer',
                 'sme',
                 'test_engineer'
+                // Note: designer is opt-in, not included by default
             ]);
         });
 
@@ -143,10 +148,12 @@ describe('createAgents', () => {
                 'local_architect',
                 'local_coder',
                 'local_critic',
+                'local_docs',
                 'local_explorer',
                 'local_reviewer',
                 'local_sme',
                 'local_test_engineer'
+                // Note: designer is opt-in, not included by default
             ]);
         });
 
@@ -282,6 +289,7 @@ describe('getAgentConfigs', () => {
         
         const configs = getAgentConfigs(config as unknown as PluginConfig);
         expect(configs.sme).toBeUndefined();
-        expect(Object.keys(configs)).toHaveLength(6);
+        // 8 agents - 1 disabled = 7 agents (docs included by default)
+        expect(Object.keys(configs)).toHaveLength(7);
     });
 });

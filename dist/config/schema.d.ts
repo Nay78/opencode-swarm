@@ -137,6 +137,17 @@ export declare const IntegrationAnalysisConfigSchema: z.ZodObject<{
     enabled: z.ZodDefault<z.ZodBoolean>;
 }, z.core.$strip>;
 export type IntegrationAnalysisConfig = z.infer<typeof IntegrationAnalysisConfigSchema>;
+export declare const DocsConfigSchema: z.ZodObject<{
+    enabled: z.ZodDefault<z.ZodBoolean>;
+    doc_patterns: z.ZodDefault<z.ZodArray<z.ZodString>>;
+}, z.core.$strip>;
+export type DocsConfig = z.infer<typeof DocsConfigSchema>;
+export declare const UIReviewConfigSchema: z.ZodObject<{
+    enabled: z.ZodDefault<z.ZodBoolean>;
+    trigger_paths: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    trigger_keywords: z.ZodDefault<z.ZodArray<z.ZodString>>;
+}, z.core.$strip>;
+export type UIReviewConfig = z.infer<typeof UIReviewConfigSchema>;
 export declare const GuardrailsProfileSchema: z.ZodObject<{
     max_tool_calls: z.ZodOptional<z.ZodNumber>;
     max_duration_minutes: z.ZodOptional<z.ZodNumber>;
@@ -297,6 +308,15 @@ export declare const PluginConfigSchema: z.ZodObject<{
     }, z.core.$strip>>;
     integration_analysis: z.ZodOptional<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strip>>;
+    docs: z.ZodOptional<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        doc_patterns: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    }, z.core.$strip>>;
+    ui_review: z.ZodOptional<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        trigger_paths: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        trigger_keywords: z.ZodDefault<z.ZodArray<z.ZodString>>;
     }, z.core.$strip>>;
     _loadedFromFile: z.ZodDefault<z.ZodBoolean>;
 }, z.core.$strip>;

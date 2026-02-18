@@ -166,6 +166,20 @@ export function createSystemEnhancerHook(
 							);
 						}
 
+						// v6.1: UI/UX Designer agent opt-in
+						if (config.ui_review?.enabled) {
+							tryInject(
+								'[SWARM CONFIG] UI/UX Designer agent is ENABLED. For tasks matching UI trigger keywords or file paths, delegate to designer BEFORE coder (Rule 9).',
+							);
+						}
+
+						// v6.1: Docs agent opt-out
+						if (config.docs?.enabled === false) {
+							tryInject(
+								'[SWARM CONFIG] Docs agent is DISABLED. Skip docs delegation in Phase 6.',
+							);
+						}
+
 						return;
 					}
 
@@ -287,6 +301,34 @@ export function createSystemEnhancerHook(
 					if (config.integration_analysis?.enabled === false) {
 						const text =
 							'[SWARM CONFIG] Integration analysis is DISABLED. Skip diff tool and integration impact analysis after coder tasks.';
+						candidates.push({
+							id: `candidate-${idCounter++}`,
+							kind: 'phase' as ContextCandidate['kind'],
+							text,
+							tokens: estimateTokens(text),
+							priority: 1,
+							metadata: { contentType: 'prose' as ContentType },
+						});
+					}
+
+					// v6.1: UI/UX Designer agent opt-in
+					if (config.ui_review?.enabled) {
+						const text =
+							'[SWARM CONFIG] UI/UX Designer agent is ENABLED. For tasks matching UI trigger keywords or file paths, delegate to designer BEFORE coder (Rule 9).';
+						candidates.push({
+							id: `candidate-${idCounter++}`,
+							kind: 'phase' as ContextCandidate['kind'],
+							text,
+							tokens: estimateTokens(text),
+							priority: 1,
+							metadata: { contentType: 'prose' as ContentType },
+						});
+					}
+
+					// v6.1: Docs agent opt-out
+					if (config.docs?.enabled === false) {
+						const text =
+							'[SWARM CONFIG] Docs agent is DISABLED. Skip docs delegation in Phase 6.';
 						candidates.push({
 							id: `candidate-${idCounter++}`,
 							kind: 'phase' as ContextCandidate['kind'],

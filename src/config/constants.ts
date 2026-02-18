@@ -7,6 +7,8 @@ export const ORCHESTRATOR_NAME = 'architect' as const;
 
 export const ALL_SUBAGENT_NAMES = [
 	'sme',
+	'docs',
+	'designer',
 	...QA_AGENTS,
 	...PIPELINE_AGENTS,
 ] as const;
@@ -41,6 +43,12 @@ export const DEFAULT_MODELS: Record<string, string> = {
 
 	// Critic agent (QA - plan review gate)
 	critic: 'google/gemini-2.0-flash',
+
+	// Documentation synthesizer
+	docs: 'google/gemini-2.0-flash',
+
+	// UI/UX Designer
+	designer: 'google/gemini-2.0-flash',
 
 	// Fallback
 	default: 'google/gemini-2.0-flash',

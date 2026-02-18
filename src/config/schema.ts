@@ -136,6 +136,60 @@ export type IntegrationAnalysisConfig = z.infer<
 	typeof IntegrationAnalysisConfigSchema
 >;
 
+// Documentation synthesizer configuration
+export const DocsConfigSchema = z.object({
+	enabled: z.boolean().default(true),
+	doc_patterns: z
+		.array(z.string())
+		.default([
+			'README.md',
+			'CONTRIBUTING.md',
+			'docs/**/*.md',
+			'docs/**/*.rst',
+			'**/CHANGELOG.md',
+		]),
+});
+
+export type DocsConfig = z.infer<typeof DocsConfigSchema>;
+
+// UI/UX review configuration (designer agent — opt-in)
+export const UIReviewConfigSchema = z.object({
+	enabled: z.boolean().default(false),
+	trigger_paths: z
+		.array(z.string())
+		.default([
+			'**/pages/**',
+			'**/components/**',
+			'**/views/**',
+			'**/screens/**',
+			'**/ui/**',
+			'**/layouts/**',
+		]),
+	trigger_keywords: z
+		.array(z.string())
+		.default([
+			'new page',
+			'new screen',
+			'new component',
+			'redesign',
+			'layout change',
+			'form',
+			'modal',
+			'dialog',
+			'dropdown',
+			'sidebar',
+			'navbar',
+			'dashboard',
+			'landing page',
+			'signup',
+			'login form',
+			'settings page',
+			'profile page',
+		]),
+});
+
+export type UIReviewConfig = z.infer<typeof UIReviewConfigSchema>;
+
 // Guardrails profile (per-agent overrides - all fields optional)
 export const GuardrailsProfileSchema = z.object({
 	max_tool_calls: z.number().min(0).max(1000).optional(),
@@ -184,6 +238,16 @@ export const DEFAULT_AGENT_PROFILES: Record<string, GuardrailsProfile> = {
 		max_tool_calls: 200,
 		max_duration_minutes: 30,
 		warning_threshold: 0.65,
+	},
+	docs: {
+		max_tool_calls: 200,
+		max_duration_minutes: 30,
+		warning_threshold: 0.75,
+	},
+	designer: {
+		max_tool_calls: 150,
+		max_duration_minutes: 20,
+		warning_threshold: 0.75,
 	},
 };
 
@@ -326,6 +390,12 @@ export const PluginConfigSchema = z.object({
 
 	// Integration analysis configuration
 	integration_analysis: IntegrationAnalysisConfigSchema.optional(),
+
+	// Documentation synthesizer configuration
+	docs: DocsConfigSchema.optional(),
+
+	// UI/UX review configuration (designer agent)
+	ui_review: UIReviewConfigSchema.optional(),
 
 	// Internal: tracks whether config was loaded from file or is fallback defaults
 	_loadedFromFile: z.boolean().default(false),

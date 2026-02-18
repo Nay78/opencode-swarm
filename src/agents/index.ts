@@ -8,6 +8,8 @@ import { DEFAULT_MODELS } from '../config/constants';
 import { type AgentDefinition, createArchitectAgent } from './architect';
 import { createCoderAgent } from './coder';
 import { createCriticAgent } from './critic';
+import { createDesignerAgent } from './designer';
+import { createDocsAgent } from './docs';
 import { createExplorerAgent } from './explorer';
 import { createReviewerAgent } from './reviewer';
 import { createSMEAgent } from './sme';
@@ -239,6 +241,33 @@ If you call @coder instead of @${swarmId}_coder, the call will FAIL or go to the
 		agents.push(applyOverrides(testEngineer, swarmAgents, swarmPrefix));
 	}
 
+	// 8. Create Docs agent (enabled by default — must be explicitly disabled)
+	if (!isAgentDisabled('docs', swarmAgents, swarmPrefix)) {
+		const docsPrompts = getPrompts('docs');
+		const docs = createDocsAgent(
+			getModel('docs'),
+			docsPrompts.prompt,
+			docsPrompts.appendPrompt,
+		);
+		docs.name = prefixName('docs');
+		agents.push(applyOverrides(docs, swarmAgents, swarmPrefix));
+	}
+
+	// 9. Create Designer agent (opt-in — only when ui_review.enabled === true)
+	if (
+		pluginConfig?.ui_review?.enabled === true &&
+		!isAgentDisabled('designer', swarmAgents, swarmPrefix)
+	) {
+		const designerPrompts = getPrompts('designer');
+		const designer = createDesignerAgent(
+			getModel('designer'),
+			designerPrompts.prompt,
+			designerPrompts.appendPrompt,
+		);
+		designer.name = prefixName('designer');
+		agents.push(applyOverrides(designer, swarmAgents, swarmPrefix));
+	}
+
 	return agents;
 }
 
@@ -316,6 +345,8 @@ export function getAgentConfigs(
 export { createArchitectAgent } from './architect';
 export { createCoderAgent } from './coder';
 export { createCriticAgent } from './critic';
+export { createDesignerAgent } from './designer';
+export { createDocsAgent } from './docs';
 export { createExplorerAgent } from './explorer';
 export {
 	createReviewerAgent,

@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.1.0] - 2026-02-18
+
+### Added
+- **`docs` agent** — Documentation synthesizer, enabled by default. Delegates in Phase 6 step 2 with a list of changed files and change summary. Configurable via `docs: { enabled, doc_patterns }` in plugin config.
+- **`designer` agent** — UI/UX specification agent, opt-in via `ui_review: { enabled: true }`. Generates component scaffolds before coder runs on UI tasks (Rule 9: UI/UX Design Gate in architect prompt).
+- **`DocsConfigSchema`** — Optional `docs` config block: `{ enabled: boolean, doc_patterns: string[] }`.
+- **`UIReviewConfigSchema`** — Optional `ui_review` config block: `{ enabled: boolean }`.
+- **Guardrails profiles** for `docs` (200 tool calls / 30 min) and `designer` (150 tool calls / 20 min) in `DEFAULT_AGENT_PROFILES`.
+- **Architect Rule 9** — UI/UX Design Gate: when task matches UI trigger conditions (UI keywords or UI file paths), delegate to designer first, then pass scaffold to coder.
+- **Phase 5 updated to steps 5a–5h** — Step 5a is the conditional UI design gate; step 5b onwards is the existing coder → diff → review → security → verify → adversarial sequence.
+- **Phase 6 step 2** — After rescan, architect delegates docs agent with changed files and change summary.
+- **System-enhancer hint injection** — When `ui_review.enabled: true`, injects `[SWARM CONFIG] UI/UX Designer agent is ENABLED` hint. When `docs.enabled: false`, injects docs-disabled hint. Both injected in Path A and Path B.
+- New delegation examples in architect prompt for `mega_docs` and `mega_designer`.
+
+### Tests
+- 55 new tests: createDocsAgent (structure, model, temperature, prompt overrides), createDesignerAgent (structure, model, temperature, prompt overrides), agent registration constants (docs + designer in PIPELINE_AGENTS/ALL_AGENT_NAMES), system-enhancer hint injections (4 cases), designer opt-in registration (2 cases).
+- Total: 1258 tests across 57 files.
+
 ## [6.0.1] - 2026-02-18
 
 ### Fixed

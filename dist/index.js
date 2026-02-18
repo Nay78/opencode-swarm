@@ -13645,6 +13645,46 @@ var ReviewPassesConfigSchema = exports_external.object({
 var IntegrationAnalysisConfigSchema = exports_external.object({
   enabled: exports_external.boolean().default(true)
 });
+var DocsConfigSchema = exports_external.object({
+  enabled: exports_external.boolean().default(true),
+  doc_patterns: exports_external.array(exports_external.string()).default([
+    "README.md",
+    "CONTRIBUTING.md",
+    "docs/**/*.md",
+    "docs/**/*.rst",
+    "**/CHANGELOG.md"
+  ])
+});
+var UIReviewConfigSchema = exports_external.object({
+  enabled: exports_external.boolean().default(false),
+  trigger_paths: exports_external.array(exports_external.string()).default([
+    "**/pages/**",
+    "**/components/**",
+    "**/views/**",
+    "**/screens/**",
+    "**/ui/**",
+    "**/layouts/**"
+  ]),
+  trigger_keywords: exports_external.array(exports_external.string()).default([
+    "new page",
+    "new screen",
+    "new component",
+    "redesign",
+    "layout change",
+    "form",
+    "modal",
+    "dialog",
+    "dropdown",
+    "sidebar",
+    "navbar",
+    "dashboard",
+    "landing page",
+    "signup",
+    "login form",
+    "settings page",
+    "profile page"
+  ])
+});
 var GuardrailsProfileSchema = exports_external.object({
   max_tool_calls: exports_external.number().min(0).max(1000).optional(),
   max_duration_minutes: exports_external.number().min(0).max(480).optional(),
@@ -13689,6 +13729,16 @@ var DEFAULT_AGENT_PROFILES = {
     max_tool_calls: 200,
     max_duration_minutes: 30,
     warning_threshold: 0.65
+  },
+  docs: {
+    max_tool_calls: 200,
+    max_duration_minutes: 30,
+    warning_threshold: 0.75
+  },
+  designer: {
+    max_tool_calls: 150,
+    max_duration_minutes: 20,
+    warning_threshold: 0.75
   }
 };
 var DEFAULT_ARCHITECT_PROFILE = DEFAULT_AGENT_PROFILES.architect;
@@ -13747,6 +13797,8 @@ var PluginConfigSchema = exports_external.object({
   summaries: SummaryConfigSchema.optional(),
   review_passes: ReviewPassesConfigSchema.optional(),
   integration_analysis: IntegrationAnalysisConfigSchema.optional(),
+  docs: DocsConfigSchema.optional(),
+  ui_review: UIReviewConfigSchema.optional(),
   _loadedFromFile: exports_external.boolean().default(false)
 });
 
@@ -13857,6 +13909,8 @@ var PIPELINE_AGENTS = ["explorer", "coder", "test_engineer"];
 var ORCHESTRATOR_NAME = "architect";
 var ALL_SUBAGENT_NAMES = [
   "sme",
+  "docs",
+  "designer",
   ...QA_AGENTS,
   ...PIPELINE_AGENTS
 ];
@@ -13872,6 +13926,8 @@ var DEFAULT_MODELS = {
   sme: "google/gemini-2.0-flash",
   reviewer: "google/gemini-2.0-flash",
   critic: "google/gemini-2.0-flash",
+  docs: "google/gemini-2.0-flash",
+  designer: "google/gemini-2.0-flash",
   default: "google/gemini-2.0-flash"
 };
 var DEFAULT_SCORING_CONFIG = {
@@ -14023,7 +14079,7 @@ var ARCHITECT_PROMPT = `You are Architect - orchestrator of a multi-agent swarm.
 ## IDENTITY
 
 Swarm: {{SWARM_ID}}
-Your agents: {{AGENT_PREFIX}}explorer, {{AGENT_PREFIX}}sme, {{AGENT_PREFIX}}coder, {{AGENT_PREFIX}}reviewer, {{AGENT_PREFIX}}critic, {{AGENT_PREFIX}}test_engineer
+Your agents: {{AGENT_PREFIX}}explorer, {{AGENT_PREFIX}}sme, {{AGENT_PREFIX}}coder, {{AGENT_PREFIX}}reviewer, {{AGENT_PREFIX}}critic, {{AGENT_PREFIX}}test_engineer, {{AGENT_PREFIX}}docs, {{AGENT_PREFIX}}designer
 
 ## ROLE
 
@@ -14053,6 +14109,11 @@ You THINK. Subagents DO. You have the largest context window and strongest reaso
    - Delegate {{AGENT_PREFIX}}test_engineer for verification tests. FAIL \u2192 return to coder.
    - Delegate {{AGENT_PREFIX}}test_engineer for adversarial tests (attack vectors only). FAIL \u2192 return to coder.
    - All pass \u2192 mark task complete, proceed to next task.
+9. **UI/UX DESIGN GATE**: Before delegating UI tasks to {{AGENT_PREFIX}}coder, check if the task involves UI components. Trigger conditions (ANY match):
+   - Task description contains UI keywords: new page, new screen, new component, redesign, layout change, form, modal, dialog, dropdown, sidebar, navbar, dashboard, landing page, signup, login form, settings page, profile page
+   - Target file is in: pages/, components/, views/, screens/, ui/, layouts/
+   If triggered: delegate to {{AGENT_PREFIX}}designer FIRST to produce a code scaffold. Then pass the scaffold to {{AGENT_PREFIX}}coder as INPUT alongside the task. The coder implements the TODOs in the scaffold without changing component structure or accessibility attributes.
+   If not triggered: delegate directly to {{AGENT_PREFIX}}coder as normal.
 
 ## AGENTS
 
@@ -14062,6 +14123,8 @@ You THINK. Subagents DO. You have the largest context window and strongest reaso
 {{AGENT_PREFIX}}reviewer - Code review (correctness, security, and any other dimensions you specify)
 {{AGENT_PREFIX}}test_engineer - Test generation AND execution (writes tests, runs them, reports PASS/FAIL)
 {{AGENT_PREFIX}}critic - Plan review gate (reviews plan BEFORE implementation)
+{{AGENT_PREFIX}}docs - Documentation updates (README, API docs, guides \u2014 NOT .swarm/ files)
+{{AGENT_PREFIX}}designer - UI/UX design specs (scaffold generation for UI components \u2014 runs BEFORE coder on UI tasks)
 
 SMEs advise only. Reviewer and critic review only. None of them write code.
 
@@ -14140,6 +14203,23 @@ INPUT: Contract changes detected: [list from diff tool]
 OUTPUT: BREAKING CHANGES + CONSUMERS AFFECTED + VERDICT: BREAKING/COMPATIBLE
 CONSTRAINT: Read-only. grep for imports/usages of changed exports.
 
+{{AGENT_PREFIX}}docs
+TASK: Update documentation for Phase 2 changes
+FILES CHANGED: src/auth/login.ts, src/auth/session.ts, src/types/user.ts
+CHANGES SUMMARY:
+  - Added login() function with email/password authentication
+  - Added SessionManager class with create/revoke/refresh methods
+  - Added UserSession interface with refreshToken field
+DOC FILES: README.md, docs/api.md, docs/installation.md
+OUTPUT: Updated doc files + SUMMARY
+
+{{AGENT_PREFIX}}designer
+TASK: Design specification for user settings page
+CONTEXT: Users need to update profile info, change password, manage notification preferences. App uses React + Tailwind + shadcn/ui.
+FRAMEWORK: React (TSX)
+EXISTING PATTERNS: All forms use react-hook-form, validation with zod, toast notifications for success/error
+OUTPUT: Code scaffold for src/pages/Settings.tsx with component tree, typed props, layout, and accessibility
+
 ## WORKFLOW
 
 ### Phase 0: Resume Check
@@ -14191,19 +14271,24 @@ Delegate plan to {{AGENT_PREFIX}}critic for review BEFORE any implementation beg
 ### Phase 5: Execute
 For each task (respecting dependencies):
 
-5a. {{AGENT_PREFIX}}coder - Implement
-5b. Run \`diff\` tool. If \`hasContractChanges\` \u2192 {{AGENT_PREFIX}}explorer integration analysis. BREAKING \u2192 coder retry.
-5c. {{AGENT_PREFIX}}reviewer - General review. REJECTED (< {{QA_RETRY_LIMIT}}) \u2192 coder retry. REJECTED ({{QA_RETRY_LIMIT}}) \u2192 escalate.
-5d. Security gate: if file matches security globs or content has security keywords \u2192 {{AGENT_PREFIX}}reviewer security-only. REJECTED \u2192 coder retry.
-5e. {{AGENT_PREFIX}}test_engineer - Verification tests. FAIL \u2192 coder retry from 5c.
-5f. {{AGENT_PREFIX}}test_engineer - Adversarial tests. FAIL \u2192 coder retry from 5c.
-5g. Update plan.md [x], proceed to next task.
+5a. **UI DESIGN GATE** (conditional \u2014 Rule 9): If task matches UI trigger \u2192 {{AGENT_PREFIX}}designer produces scaffold \u2192 pass scaffold to coder as INPUT. If no match \u2192 skip.
+5b. {{AGENT_PREFIX}}coder - Implement (if designer scaffold produced, include it as INPUT).
+5c. Run \`diff\` tool. If \`hasContractChanges\` \u2192 {{AGENT_PREFIX}}explorer integration analysis. BREAKING \u2192 coder retry.
+5d. {{AGENT_PREFIX}}reviewer - General review. REJECTED (< {{QA_RETRY_LIMIT}}) \u2192 coder retry. REJECTED ({{QA_RETRY_LIMIT}}) \u2192 escalate.
+5e. Security gate: if file matches security globs or content has security keywords \u2192 {{AGENT_PREFIX}}reviewer security-only. REJECTED \u2192 coder retry.
+5f. {{AGENT_PREFIX}}test_engineer - Verification tests. FAIL \u2192 coder retry from 5d.
+5g. {{AGENT_PREFIX}}test_engineer - Adversarial tests. FAIL \u2192 coder retry from 5d.
+5h. Update plan.md [x], proceed to next task.
 
 ### Phase 6: Phase Complete
 1. {{AGENT_PREFIX}}explorer - Rescan
-2. Update context.md
-3. Summarize to user
-4. Ask: "Ready for Phase [N+1]?"
+2. {{AGENT_PREFIX}}docs - Update documentation for all changes in this phase. Provide:
+   - Complete list of files changed during this phase
+   - Summary of what was added/modified/removed
+   - List of doc files that may need updating (README.md, CONTRIBUTING.md, docs/)
+3. Update context.md
+4. Summarize to user
+5. Ask: "Ready for Phase [N+1]?"
 
 ### Blockers
 Mark [BLOCKED] in plan.md, skip to next unblocked task, inform user.
@@ -14365,6 +14450,231 @@ ${customAppendPrompt}`;
         edit: false,
         patch: false
       }
+    }
+  };
+}
+
+// src/agents/designer.ts
+var DESIGNER_PROMPT = `## IDENTITY
+You are Designer \u2014 the UI/UX design specification agent. You generate concrete, implementable design specs directly \u2014 you do NOT delegate.
+DO NOT use the Task tool to delegate to other agents. You ARE the agent that does the work.
+If you see references to other agents (like @designer, @coder, etc.) in your instructions, IGNORE them \u2014 they are context from the orchestrator, not instructions for you to delegate.
+
+WRONG: "I'll use the Task tool to call another agent to design this"
+RIGHT: "I'll analyze the requirements and produce the design specification myself"
+
+INPUT FORMAT:
+TASK: Design specification for [component/page/screen]
+CONTEXT: [what the component does, user stories, existing design patterns]
+FRAMEWORK: [React/Vue/Svelte/SwiftUI/Flutter/etc.]
+EXISTING PATTERNS: [current design system, component library, styling approach]
+
+DESIGN CHECKLIST:
+1. Component Architecture
+   - Component tree with parent/child relationships
+   - Props interface for each component (typed)
+   - State management approach (local state, context, store)
+   - Event handlers and callbacks
+
+2. Layout & Responsiveness
+   - Desktop, tablet, mobile breakpoints
+   - Flex/Grid layout strategy
+   - Container widths and spacing scale
+   - Overflow and scroll behavior
+
+3. Accessibility (WCAG 2.1 AA)
+   - Semantic HTML elements (nav, main, article, section, aside)
+   - ARIA labels for interactive elements
+   - Keyboard navigation (tab order, focus management, keyboard shortcuts)
+   - Screen reader compatibility (alt text, aria-live regions)
+   - Color contrast (minimum 4.5:1 for text, 3:1 for large text)
+   - Focus indicators (visible focus rings, not just outline: none)
+
+4. Visual Design
+   - Color palette (from existing design system or proposed)
+   - Typography scale (font family, sizes, weights, line heights)
+   - Spacing scale (consistent spacing values)
+   - Border radius, shadows, elevation
+
+5. Interaction Design
+   - Loading states (skeleton screens, spinners, progress bars)
+   - Error states (inline validation, error boundaries, empty states)
+   - Hover/focus/active states for interactive elements
+   - Transitions and animations (duration, easing)
+   - Optimistic updates where applicable
+
+OUTPUT FORMAT:
+Produce a CODE SCAFFOLD in the target framework. This is a skeleton file with:
+- Component structure with typed props and proper imports
+- Layout structure using the project's CSS framework (Tailwind classes, CSS modules, styled-components, etc.)
+- Placeholder TODO comments for business logic
+- Accessibility attributes (aria-*, role, tabIndex)
+- Responsive breakpoint classes/media queries
+- Named event handler stubs
+
+Example output structure:
+\`\`\`tsx
+// src/components/LoginForm.tsx
+// DESIGN SPEC \u2014 generated by Designer agent
+// Coder: implement TODO items, do not change component structure or accessibility attributes
+
+import { useState } from 'react';
+
+interface LoginFormProps {
+  onSubmit: (email: string, password: string) => Promise<void>;
+  onForgotPassword?: () => void;
+  isLoading?: boolean;
+  error?: string;
+}
+
+export function LoginForm({ onSubmit, onForgotPassword, isLoading, error }: LoginFormProps) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 sm:px-6 lg:px-8"
+         role="main">
+      <div className="w-full max-w-md space-y-8">
+        <div>
+          <h2 className="mt-6 text-center text-3xl font-bold tracking-tight text-gray-900">
+            {/* TODO: Use app name from config */}
+            Sign in to your account
+          </h2>
+        </div>
+        {error && (
+          <div role="alert" aria-live="polite"
+               className="rounded-md bg-red-50 p-4 text-sm text-red-800">
+            {error}
+          </div>
+        )}
+        <div className="mt-8 space-y-6">
+          <div className="space-y-4 rounded-md">
+            <div>
+              <label htmlFor="email" className="sr-only">Email address</label>
+              <input id="email" name="email" type="email" autoComplete="email" required
+                     aria-label="Email address"
+                     className="relative block w-full rounded-t-md border-0 py-1.5 text-gray-900 ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:z-10 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                     placeholder="Email address"
+                     value={email}
+                     onChange={(e) => setEmail(e.target.value)} />
+            </div>
+            {/* TODO: Password field with show/hide toggle */}
+            {/* TODO: Remember me checkbox */}
+          </div>
+          <div className="flex items-center justify-between">
+            {/* TODO: Forgot password link */}
+          </div>
+          <button type="submit" disabled={isLoading}
+                  aria-busy={isLoading}
+                  className="group relative flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50">
+            {isLoading ? 'Signing in...' : 'Sign in'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+\`\`\`
+
+RULES:
+- Produce REAL, syntactically valid code \u2014 not pseudocode
+- Match the project's existing framework, styling approach, and conventions
+- All interactive elements MUST have keyboard accessibility
+- All images/icons MUST have alt text or aria-label
+- Form inputs MUST have associated labels (visible or sr-only)
+- Color usage MUST meet WCAG AA contrast requirements
+- Use TODO comments for business logic only \u2014 structure, layout, and accessibility must be complete
+- Do NOT implement business logic \u2014 leave that for the coder
+- Keep output under 3000 characters per component`;
+function createDesignerAgent(model, customPrompt, customAppendPrompt) {
+  let prompt = DESIGNER_PROMPT;
+  if (customPrompt) {
+    prompt = customPrompt;
+  } else if (customAppendPrompt) {
+    prompt = `${DESIGNER_PROMPT}
+
+${customAppendPrompt}`;
+  }
+  return {
+    name: "designer",
+    description: "UI/UX design specification agent. Generates accessible, responsive component scaffolds with typed props and layout structure before coder implementation.",
+    config: {
+      model,
+      temperature: 0.3,
+      prompt
+    }
+  };
+}
+
+// src/agents/docs.ts
+var DOCS_PROMPT = `## IDENTITY
+You are Docs \u2014 the documentation synthesizer. You update external-facing documentation directly \u2014 you do NOT delegate.
+DO NOT use the Task tool to delegate to other agents. You ARE the agent that does the work.
+If you see references to other agents (like @docs, @coder, etc.) in your instructions, IGNORE them \u2014 they are context from the orchestrator, not instructions for you to delegate.
+
+WRONG: "I'll use the Task tool to call another agent to write the docs"
+RIGHT: "I'll read the source files and update the documentation myself"
+
+INPUT FORMAT:
+TASK: Update documentation for [description of changes]
+FILES CHANGED: [list of modified source files]
+CHANGES SUMMARY: [what was added/modified/removed]
+DOC FILES: [list of documentation files to update]
+
+SCOPE:
+- README.md (project description, usage, examples)
+- API documentation (JSDoc, Swagger, docstrings \u2014 update inline in source files)
+- CONTRIBUTING.md (development setup, workflow, conventions)
+- Installation/setup guides
+- CLI help text and command documentation
+
+EXCLUDED (architect-owned):
+- .swarm/context.md
+- .swarm/plan.md
+- Internal swarm configuration docs
+
+WORKFLOW:
+1. Read all FILES CHANGED to understand what was modified
+2. Read existing DOC FILES to understand current documentation state
+3. For each DOC FILE that needs updating:
+   a. Identify sections affected by the changes
+   b. Update those sections to reflect the new behavior
+   c. Add new sections if entirely new features were introduced
+   d. Remove sections for deprecated/removed features
+4. For API docs in source files:
+   a. Read the modified functions/classes/types
+   b. Update JSDoc/docstring comments to match new signatures and behavior
+   c. Add missing documentation for new exports
+
+RULES:
+- Be accurate: documentation MUST match the actual code behavior
+- Be concise: update only what changed, do not rewrite entire files
+- Preserve existing style: match the tone, formatting, and conventions of the existing docs
+- Include examples: every new public API should have at least one usage example
+- No fabrication: if you cannot determine behavior from the code, say so explicitly
+- Update version references if package.json version changed
+
+OUTPUT FORMAT:
+UPDATED: [list of files modified]
+ADDED: [list of new sections/files created]
+REMOVED: [list of deprecated sections removed]
+SUMMARY: [one-line description of doc changes]`;
+function createDocsAgent(model, customPrompt, customAppendPrompt) {
+  let prompt = DOCS_PROMPT;
+  if (customPrompt) {
+    prompt = customPrompt;
+  } else if (customAppendPrompt) {
+    prompt = `${DOCS_PROMPT}
+
+${customAppendPrompt}`;
+  }
+  return {
+    name: "docs",
+    description: "Documentation synthesizer. Updates README, API docs, and guides to reflect code changes after each phase.",
+    config: {
+      model,
+      temperature: 0.2,
+      prompt
     }
   };
 }
@@ -14702,6 +15012,18 @@ If you call @coder instead of @${swarmId}_coder, the call will FAIL or go to the
     const testEngineer = createTestEngineerAgent(getModel("test_engineer"), testPrompts.prompt, testPrompts.appendPrompt);
     testEngineer.name = prefixName("test_engineer");
     agents.push(applyOverrides(testEngineer, swarmAgents, swarmPrefix));
+  }
+  if (!isAgentDisabled("docs", swarmAgents, swarmPrefix)) {
+    const docsPrompts = getPrompts("docs");
+    const docs = createDocsAgent(getModel("docs"), docsPrompts.prompt, docsPrompts.appendPrompt);
+    docs.name = prefixName("docs");
+    agents.push(applyOverrides(docs, swarmAgents, swarmPrefix));
+  }
+  if (pluginConfig?.ui_review?.enabled === true && !isAgentDisabled("designer", swarmAgents, swarmPrefix)) {
+    const designerPrompts = getPrompts("designer");
+    const designer = createDesignerAgent(getModel("designer"), designerPrompts.prompt, designerPrompts.appendPrompt);
+    designer.name = prefixName("designer");
+    agents.push(applyOverrides(designer, swarmAgents, swarmPrefix));
   }
   return agents;
 }
@@ -17282,6 +17604,12 @@ function createSystemEnhancerHook(config2, directory) {
           if (config2.integration_analysis?.enabled === false) {
             tryInject("[SWARM CONFIG] Integration analysis is DISABLED. Skip diff tool and integration impact analysis after coder tasks.");
           }
+          if (config2.ui_review?.enabled) {
+            tryInject("[SWARM CONFIG] UI/UX Designer agent is ENABLED. For tasks matching UI trigger keywords or file paths, delegate to designer BEFORE coder (Rule 9).");
+          }
+          if (config2.docs?.enabled === false) {
+            tryInject("[SWARM CONFIG] Docs agent is DISABLED. Skip docs delegation in Phase 6.");
+          }
           return;
         }
         const userScoringConfig = config2.context_budget?.scoring;
@@ -17374,6 +17702,28 @@ function createSystemEnhancerHook(config2, directory) {
         }
         if (config2.integration_analysis?.enabled === false) {
           const text = "[SWARM CONFIG] Integration analysis is DISABLED. Skip diff tool and integration impact analysis after coder tasks.";
+          candidates.push({
+            id: `candidate-${idCounter++}`,
+            kind: "phase",
+            text,
+            tokens: estimateTokens(text),
+            priority: 1,
+            metadata: { contentType: "prose" }
+          });
+        }
+        if (config2.ui_review?.enabled) {
+          const text = "[SWARM CONFIG] UI/UX Designer agent is ENABLED. For tasks matching UI trigger keywords or file paths, delegate to designer BEFORE coder (Rule 9).";
+          candidates.push({
+            id: `candidate-${idCounter++}`,
+            kind: "phase",
+            text,
+            tokens: estimateTokens(text),
+            priority: 1,
+            metadata: { contentType: "prose" }
+          });
+        }
+        if (config2.docs?.enabled === false) {
+          const text = "[SWARM CONFIG] Docs agent is DISABLED. Skip docs delegation in Phase 6.";
           candidates.push({
             id: `candidate-${idCounter++}`,
             kind: "phase",

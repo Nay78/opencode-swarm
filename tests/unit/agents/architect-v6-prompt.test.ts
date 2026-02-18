@@ -67,7 +67,7 @@ describe('Architect Prompt v6.0 QA & Security Gates', () => {
 	});
 
 	describe('Phase 5 Structure', () => {
-		it('12. Phase 5 has steps 5a-5g', () => {
+		it('12. Phase 5 has steps 5a-5h', () => {
 			expect(prompt).toContain('5a.');
 			expect(prompt).toContain('5b.');
 			expect(prompt).toContain('5c.');
@@ -75,10 +75,11 @@ describe('Architect Prompt v6.0 QA & Security Gates', () => {
 			expect(prompt).toContain('5e.');
 			expect(prompt).toContain('5f.');
 			expect(prompt).toContain('5g.');
+			expect(prompt).toContain('5h.');
 		});
 
-		it('13. Phase 5 does NOT have steps 5h or beyond', () => {
-			expect(prompt).not.toContain('5h.');
+		it('13. Phase 5 does NOT have steps 5i or beyond', () => {
+			expect(prompt).not.toContain('5i.');
 		});
 
 		it('14. Phase 5 mentions adversarial tests', () => {

@@ -26,18 +26,20 @@ describe('constants.ts', () => {
     });
 
     describe('ALL_SUBAGENT_NAMES', () => {
-        it('contains all 6 subagents (sme + QA + pipeline)', () => {
-            const expected = ['sme', 'reviewer', 'critic', 'explorer', 'coder', 'test_engineer'];
+        it('contains all 8 subagents (sme + docs + designer + QA + pipeline)', () => {
+            // v6.1: added docs (default enabled) and designer (opt-in)
+            const expected = ['sme', 'docs', 'designer', 'reviewer', 'critic', 'explorer', 'coder', 'test_engineer'];
             expect(ALL_SUBAGENT_NAMES).toEqual(expected);
-            expect(ALL_SUBAGENT_NAMES).toHaveLength(6);
+            expect(ALL_SUBAGENT_NAMES).toHaveLength(8);
         });
     });
 
     describe('ALL_AGENT_NAMES', () => {
-        it('contains architect + all 6 subagents = 7 total', () => {
-            const expected = ['architect', 'sme', 'reviewer', 'critic', 'explorer', 'coder', 'test_engineer'];
+        it('contains architect + all 8 subagents = 9 total', () => {
+            // v6.1: added docs and designer
+            const expected = ['architect', 'sme', 'docs', 'designer', 'reviewer', 'critic', 'explorer', 'coder', 'test_engineer'];
             expect(ALL_AGENT_NAMES).toEqual(expected);
-            expect(ALL_AGENT_NAMES).toHaveLength(7);
+            expect(ALL_AGENT_NAMES).toHaveLength(9);
         });
     });
 
@@ -63,8 +65,10 @@ describe('constants.ts', () => {
     });
 
     describe('isSubagent()', () => {
-        it('returns true for all 6 subagent names', () => {
+        it('returns true for all 8 subagent names', () => {
             expect(isSubagent('sme')).toBe(true);
+            expect(isSubagent('docs')).toBe(true);
+            expect(isSubagent('designer')).toBe(true);
             expect(isSubagent('reviewer')).toBe(true);
             expect(isSubagent('critic')).toBe(true);
             expect(isSubagent('explorer')).toBe(true);
@@ -103,8 +107,9 @@ describe('constants.ts', () => {
             }
         });
 
-        it('has exactly 8 entries (7 agents + default)', () => {
-            expect(Object.keys(DEFAULT_MODELS)).toHaveLength(8);
+        it('has exactly 10 entries (9 agents + default)', () => {
+            // v6.1: added docs and designer models
+            expect(Object.keys(DEFAULT_MODELS)).toHaveLength(10);
         });
     });
 });
