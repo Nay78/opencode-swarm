@@ -109,11 +109,14 @@ Benefits:
 **Swarm's approach**: Every task goes through a multi-gate QA pipeline.
 
 ```
-Task → Coder → Diff → Review → Security Review → Tests → Adversarial Tests → ✓ Complete
+Task → Coder → Diff → Imports → Lint Fix → Lint Check → Secret Scan → Review → Security Review → Tests → Adversarial Tests → ✓ Complete
 ```
 
-The v6.0.0 pipeline adds three new gates:
-- **Diff analysis** — Detect contract changes, trigger impact analysis if exports changed
+The current pipeline relies on layered quality gates before and after review:
+- **Diff analysis** — Detect contract changes and trigger impact analysis if exports changed
+- **Imports analysis** — Audit dependency consumers before integration issues ship
+- **Lint fix + lint check** — Auto-fix first, then enforce clean diagnostics
+- **Secret scan** — Detect likely credentials or key material before review
 - **Security-only review** — Automatic second pass for security-sensitive files (OWASP Top 10)
 - **Adversarial testing** — Attack vectors, boundary violations, injection attempts
 

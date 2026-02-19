@@ -49,7 +49,7 @@ OpenCode Swarm:
 ├── Architect writes .swarm/plan.md: 3 phases, 9 tasks, acceptance criteria per task
 ├── @critic reviews the plan → APPROVED
 ├── @coder implements Task 2.2 (one task, full context, nothing else)
-├── diff tool → imports tool → lint fix → secretscan → @reviewer → @test_engineer
+├── diff tool → imports tool → lint fix → lint check → secretscan → @reviewer → @test_engineer
 ├── All gates pass → plan.md updated → Task 2.2: [x]
 └── Result: working code, documented decisions, resumable project, evidence trail
 ```

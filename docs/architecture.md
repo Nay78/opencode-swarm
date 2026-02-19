@@ -66,6 +66,7 @@ Swarm enforces discipline:
 - Coder: Implements one task at a time
 - Reviewer: Dual-pass review — general correctness first, then automatic security-only pass for security-sensitive files (OWASP Top 10 categories)
 - Test Engineer: Generates verification tests + adversarial tests (attack vectors, boundary violations, injection attempts)
+- Gates: Automated `diff`, `imports`, `lint`, and `secretscan` tools verify contracts, dependencies, style, and security before/during review.
 
 ### Critic: The Gate
 - Reviews architect's plan BEFORE implementation begins
@@ -166,29 +167,44 @@ For each task in current phase:
     ├── 5a. @coder implements (ONE task)
     │       └── Wait for completion
     │
-    ├── 5b. diff tool analyzes changes
+    ├── 5b. diff + imports tools analyze changes
     │       ├── Detect contract changes (exports, interfaces, types)
+    │       ├── Track import dependencies across files
     │       └── If contracts changed → @explorer runs impact analysis
-    │
-    ├── 5c. @reviewer reviews (correctness, edge-cases, performance)
+
+    ├── 5c. @coder auto-fixes lint issues
+    │       ├── Run `lint` tool with fix mode
+    │       └── Commit fixes to implementation
+
+    ├── 5d. lint check verifies code quality
+    │       ├── Run `lint` tool without fix mode
+    │       ├── Check for errors, warnings, style violations
+    │       └── If issues found → Retry from 5c
+
+    ├── 5e. secretscan scans for sensitive data
+    │       ├── Run `secretscan` tool across changed files
+    │       ├── Check for API keys, tokens, passwords
+    │       └── If secrets found → Fix before review
+
+    ├── 5f. @reviewer reviews (correctness, edge-cases, performance)
     │       ├── APPROVED → Continue
     │       └── REJECTED → Retry from 5a (max 5)
     │
-    ├── 5d. @reviewer security-only pass (if file matches security globs
+    ├── 5g. @reviewer security-only pass (if file matches security globs
     │       or coder output contains security keywords)
     │       ├── Security globs: auth, crypto, session, token, middleware, api, security
     │       └── Uses OWASP Top 10 2021 categories
     │
-    ├── 5e. @test_engineer generates AND runs verification tests
+    ├── 5h. @test_engineer generates AND runs verification tests
     │       ├── PASS → Continue
     │       └── FAIL → Send failures to @coder, retry from 5c
     │
-    ├── 5f. @test_engineer adversarial testing pass
+    ├── 5i. @test_engineer adversarial testing pass
     │       ├── Attack vectors, boundary violations, injection attempts
     │       ├── PASS → Continue
     │       └── FAIL → Send failures to @coder, retry from 5c
     │
-    └── 5g. Update plan.md [x] complete (only after ALL gates pass)
+    └── 5j. Update plan.md [x] complete (only after ALL gates pass)
 ```
 
 ### Phase 6: Phase Complete
@@ -202,16 +218,6 @@ All tasks in phase done
     ├── Archive to .swarm/history/phase-N.md
     │
     └── Ask user: "Ready for Phase [N+1]?"
-```
-All tasks in phase done
-    │
-    ├── Re-run @explorer (codebase changed)
-    ├── Update context.md with learnings
-    ├── Archive to .swarm/history/phase-N.md
-    │
-    └── Ask user: "Ready for Phase [N+1]?"
-        ├── YES → Proceed
-        └── NO  → Wait
 ```
 
 ---
