@@ -3,13 +3,7 @@
  * Focus: Prompt injection, unsafe execution bypass, secret leakage
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-// Mock the test_runner tool
-const mockTestRunner = vi.fn();
-vi.mock('../tools/test-runner', () => ({
-	test_runner: mockTestRunner,
-}));
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
 // Import the function to test
 import { createTestEngineerAgent } from './test-engineer';

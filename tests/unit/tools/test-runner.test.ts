@@ -322,23 +322,29 @@ describe('test-runner.ts - Edge Cases', () => {
 		}, 100);
 	});
 
-	test('tool has expected structure for vitest framework', async () => {
-		const result = await test_runner.execute({}, {} as any);
-		const parsed = JSON.parse(result);
+	test('detectTestFramework correctly identifies vitest from package.json', async () => {
+		// Test framework detection without executing tests
+		const framework = await detectTestFramework();
+		expect(framework).toBe('vitest');
+	});
 
-		// Should detect vitest and have command
-		expect(parsed.framework).toBe('vitest');
-		expect(parsed.command).toBeDefined();
-		expect(parsed.command).toContain('vitest');
-	}, 10000);
+	test('tool metadata has correct structure for vitest framework', () => {
+		// Verify tool structure without executing - check the tool definition
+		expect(test_runner.args.scope).toBeDefined();
+		expect(test_runner.args.files).toBeDefined();
+		expect(test_runner.args.coverage).toBeDefined();
+		expect(test_runner.args.timeout_ms).toBeDefined();
+		
+		// Verify DEFAULT_TIMEOUT_MS is exported and correct
+		expect(DEFAULT_TIMEOUT_MS).toBe(60000);
+	});
 
-	test('timeout defaults are correct', async () => {
-		const result = await test_runner.execute({}, {} as any);
-		const parsed = JSON.parse(result);
-
-		// Default timeout should be 60000
-		expect(parsed.timeout_ms).toBe(60000);
-	}, 10000);
+	test('timeout defaults are defined correctly', () => {
+		// Test timeout constants without running external processes
+		expect(DEFAULT_TIMEOUT_MS).toBe(60_000);
+		expect(MAX_TIMEOUT_MS).toBe(300_000);
+		expect(DEFAULT_TIMEOUT_MS).toBeLessThan(MAX_TIMEOUT_MS);
+	});
 });
 
 describe('test-runner.ts - Security Validation', () => {

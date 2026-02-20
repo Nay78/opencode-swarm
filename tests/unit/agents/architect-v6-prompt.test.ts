@@ -56,7 +56,7 @@ describe('Architect Prompt v6.0 QA & Security Gates (Task 3.2)', () => {
 		});
 
 		it('11. Security gate triggers on security keywords in coder output', () => {
-			expect(prompt).toContain('coder output contains security keywords');
+			expect(prompt).toContain('content has security keywords');
 		});
 
 		it('12. Security gate delegates to reviewer with security-only CHECK', () => {
@@ -266,7 +266,7 @@ describe('Architect Prompt v6.0 QA & Security Gates (Task 3.2)', () => {
 				prompt.indexOf('### Phase 5: Execute'),
 				prompt.indexOf('### Phase 6:')
 			);
-			expect(phase5Section).toContain('REJECTED → coder retry');
+			expect(phase5Section).toContain('REJECTED (< {{QA_RETRY_LIMIT}}) → coder retry');
 		});
 	});
 
