@@ -1,0 +1,711 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { tool } from '@opencode-ai/plugin';
+
+// ============ Constants ============
+const MAX_OUTPUT_BYTES = 52_428_800; // 50MB max output
+const AUDIT_TIMEOUT_MS = 120_000; // 120 seconds
+
+// ============ Types ============
+type Severity = 'critical' | 'high' | 'moderate' | 'low' | 'info';
+type Ecosystem = 'auto' | 'npm' | 'pip' | 'cargo';
+
+interface VulnerabilityFinding {
+	package: string;
+	installedVersion: string;
+	patchedVersion: string | null;
+	severity: Severity;
+	title: string;
+	cve: string | null;
+	url: string | null;
+}
+
+interface AuditResult {
+	ecosystem: string;
+	command: string[];
+	findings: VulnerabilityFinding[];
+	criticalCount: number;
+	highCount: number;
+	totalCount: number;
+	clean: boolean;
+	note?: string;
+}
+
+interface CombinedAuditResult {
+	ecosystems: string[];
+	findings: VulnerabilityFinding[];
+	criticalCount: number;
+	highCount: number;
+	totalCount: number;
+	clean: boolean;
+}
+
+// ============ Validation ============
+function isValidEcosystem(value: unknown): value is Ecosystem {
+	return (
+		typeof value === 'string' && ['auto', 'npm', 'pip', 'cargo'].includes(value)
+	);
+}
+
+function validateArgs(args: unknown): args is { ecosystem?: Ecosystem } {
+	if (typeof args !== 'object' || args === null) return true; // ecosystem is optional
+	const obj = args as Record<string, unknown>;
+	if (obj.ecosystem !== undefined && !isValidEcosystem(obj.ecosystem)) {
+		return false;
+	}
+	return true;
+}
+
+// ============ File Detection ============
+function detectEcosystems(): string[] {
+	const ecosystems: string[] = [];
+	const cwd = process.cwd();
+
+	// Check for package.json -> npm
+	if (fs.existsSync(path.join(cwd, 'package.json'))) {
+		ecosystems.push('npm');
+	}
+
+	// Check for pyproject.toml or requirements.txt -> pip
+	if (
+		fs.existsSync(path.join(cwd, 'pyproject.toml')) ||
+		fs.existsSync(path.join(cwd, 'requirements.txt'))
+	) {
+		ecosystems.push('pip');
+	}
+
+	// Check for Cargo.toml -> cargo
+	if (fs.existsSync(path.join(cwd, 'Cargo.toml'))) {
+		ecosystems.push('cargo');
+	}
+
+	return ecosystems;
+}
+
+// ============ NPM Audit ============
+interface NpmVulnInfo {
+	severity: string;
+	range: string;
+	fixAvailable:
+		| boolean
+		| {
+				version: string;
+		  };
+	title?: string;
+	cves?: string[];
+	url?: string;
+}
+
+interface NpmAuditResponse {
+	vulnerabilities?: Record<string, NpmVulnInfo>;
+}
+
+async function runNpmAudit(): Promise<AuditResult> {
+	const command = ['npm', 'audit', '--json'];
+
+	try {
+		const proc = Bun.spawn(command, {
+			stdout: 'pipe',
+			stderr: 'pipe',
+			cwd: process.cwd(),
+		});
+
+		const timeoutPromise = new Promise<'timeout'>((resolve) =>
+			setTimeout(() => resolve('timeout'), AUDIT_TIMEOUT_MS),
+		);
+		const result = await Promise.race([
+			Promise.all([
+				new Response(proc.stdout).text(),
+				new Response(proc.stderr).text(),
+			]).then(([stdout, stderr]) => ({ stdout, stderr })),
+			timeoutPromise,
+		]);
+
+		if (result === 'timeout') {
+			proc.kill();
+			return {
+				ecosystem: 'npm',
+				command,
+				findings: [],
+				criticalCount: 0,
+				highCount: 0,
+				totalCount: 0,
+				clean: true,
+				note: `npm audit timed out after ${AUDIT_TIMEOUT_MS / 1000}s`,
+			};
+		}
+
+		let { stdout, stderr } = result;
+		if (stdout.length > MAX_OUTPUT_BYTES) {
+			stdout = stdout.slice(0, MAX_OUTPUT_BYTES);
+		}
+
+		const exitCode = await proc.exited;
+
+		// If exit code is 0, there are no vulnerabilities
+		if (exitCode === 0) {
+			return {
+				ecosystem: 'npm',
+				command,
+				findings: [],
+				criticalCount: 0,
+				highCount: 0,
+				totalCount: 0,
+				clean: true,
+			};
+		}
+
+		// Parse JSON output
+		let jsonOutput = stdout;
+		// npm audit sometimes outputs progress to stderr, try to find JSON
+		const jsonMatch =
+			stdout.match(/\{[\s\S]*\}/) || stderr.match(/\{[\s\S]*\}/);
+		if (jsonMatch) {
+			jsonOutput = jsonMatch[0];
+		}
+
+		const response = JSON.parse(jsonOutput) as NpmAuditResponse;
+		const findings: VulnerabilityFinding[] = [];
+
+		if (response.vulnerabilities) {
+			for (const [pkgName, vuln] of Object.entries(response.vulnerabilities)) {
+				let patchedVersion: string | null = null;
+				if (vuln.fixAvailable && typeof vuln.fixAvailable === 'object') {
+					patchedVersion = vuln.fixAvailable.version;
+				} else if (vuln.fixAvailable === true) {
+					patchedVersion = 'latest';
+				}
+
+				const severity = mapNpmSeverity(vuln.severity);
+
+				findings.push({
+					package: pkgName,
+					installedVersion: vuln.range,
+					patchedVersion,
+					severity,
+					title: vuln.title || `Vulnerability in ${pkgName}`,
+					cve: vuln.cves && vuln.cves.length > 0 ? vuln.cves[0] : null,
+					url: vuln.url || null,
+				});
+			}
+		}
+
+		const criticalCount = findings.filter(
+			(f) => f.severity === 'critical',
+		).length;
+		const highCount = findings.filter((f) => f.severity === 'high').length;
+
+		return {
+			ecosystem: 'npm',
+			command,
+			findings,
+			criticalCount,
+			highCount,
+			totalCount: findings.length,
+			clean: findings.length === 0,
+		};
+	} catch (error) {
+		const errorMessage =
+			error instanceof Error ? error.message : 'Unknown error';
+		// Check if npm audit is not installed
+		if (
+			errorMessage.includes('audit') ||
+			errorMessage.includes('command not found') ||
+			errorMessage.includes("'npm' is not recognized")
+		) {
+			return {
+				ecosystem: 'npm',
+				command,
+				findings: [],
+				criticalCount: 0,
+				highCount: 0,
+				totalCount: 0,
+				clean: true,
+				note: 'npm audit not available - npm may not be installed',
+			};
+		}
+		return {
+			ecosystem: 'npm',
+			command,
+			findings: [],
+			criticalCount: 0,
+			highCount: 0,
+			totalCount: 0,
+			clean: true,
+			note: `Error running npm audit: ${errorMessage}`,
+		};
+	}
+}
+
+function mapNpmSeverity(severity: string): Severity {
+	switch (severity.toLowerCase()) {
+		case 'critical':
+			return 'critical';
+		case 'high':
+			return 'high';
+		case 'moderate':
+			return 'moderate';
+		case 'low':
+			return 'low';
+		default:
+			return 'info';
+	}
+}
+
+// ============ pip-audit ============
+interface PipAuditVuln {
+	id: string;
+	aliases: string[];
+	fix_versions: string[];
+}
+
+interface PipAuditPackage {
+	name: string;
+	version: string;
+	vulns: PipAuditVuln[];
+}
+
+async function runPipAudit(): Promise<AuditResult> {
+	const command = ['pip-audit', '--format=json'];
+
+	try {
+		const proc = Bun.spawn(command, {
+			stdout: 'pipe',
+			stderr: 'pipe',
+			cwd: process.cwd(),
+		});
+
+		const timeoutPromise = new Promise<'timeout'>((resolve) =>
+			setTimeout(() => resolve('timeout'), AUDIT_TIMEOUT_MS),
+		);
+		const result = await Promise.race([
+			Promise.all([
+				new Response(proc.stdout).text(),
+				new Response(proc.stderr).text(),
+			]).then(([stdout, stderr]) => ({ stdout, stderr })),
+			timeoutPromise,
+		]);
+
+		if (result === 'timeout') {
+			proc.kill();
+			return {
+				ecosystem: 'pip',
+				command,
+				findings: [],
+				criticalCount: 0,
+				highCount: 0,
+				totalCount: 0,
+				clean: true,
+				note: `pip-audit timed out after ${AUDIT_TIMEOUT_MS / 1000}s`,
+			};
+		}
+
+		let { stdout, stderr } = result;
+		if (stdout.length > MAX_OUTPUT_BYTES) {
+			stdout = stdout.slice(0, MAX_OUTPUT_BYTES);
+		}
+
+		const exitCode = await proc.exited;
+
+		// If exit code is 0 and no output, no vulnerabilities
+		if (exitCode === 0 && !stdout.trim()) {
+			return {
+				ecosystem: 'pip',
+				command,
+				findings: [],
+				criticalCount: 0,
+				highCount: 0,
+				totalCount: 0,
+				clean: true,
+			};
+		}
+
+		// Parse JSON output
+		let packages: PipAuditPackage[] = [];
+		try {
+			const parsed = JSON.parse(stdout);
+			// pip-audit returns an array directly or object with 'dependencies'
+			if (Array.isArray(parsed)) {
+				packages = parsed;
+			} else if (parsed.dependencies) {
+				packages = parsed.dependencies;
+			}
+		} catch {
+			// If JSON parsing fails, check for error message
+			if (
+				stderr.includes('not installed') ||
+				stdout.includes('not installed') ||
+				stderr.includes('command not found')
+			) {
+				return {
+					ecosystem: 'pip',
+					command,
+					findings: [],
+					criticalCount: 0,
+					highCount: 0,
+					totalCount: 0,
+					clean: true,
+					note: 'pip-audit not installed. Install with: pip install pip-audit',
+				};
+			}
+			// Otherwise, return clean with note
+			return {
+				ecosystem: 'pip',
+				command,
+				findings: [],
+				criticalCount: 0,
+				highCount: 0,
+				totalCount: 0,
+				clean: true,
+				note: `pip-audit output could not be parsed: ${stdout.slice(0, 200)}`,
+			};
+		}
+
+		const findings: VulnerabilityFinding[] = [];
+
+		for (const pkg of packages) {
+			if (pkg.vulns && pkg.vulns.length > 0) {
+				for (const vuln of pkg.vulns) {
+					// Severity mapping: if aliases contains CVE -> high, else moderate
+					const severity: Severity =
+						vuln.aliases && vuln.aliases.length > 0 ? 'high' : 'moderate';
+
+					findings.push({
+						package: pkg.name,
+						installedVersion: pkg.version,
+						patchedVersion:
+							vuln.fix_versions && vuln.fix_versions.length > 0
+								? vuln.fix_versions[0]
+								: null,
+						severity,
+						title: vuln.id,
+						cve:
+							vuln.aliases && vuln.aliases.length > 0 ? vuln.aliases[0] : null,
+						url: vuln.id.startsWith('CVE-')
+							? `https://nvd.nist.gov/vuln/detail/${vuln.id}`
+							: null,
+					});
+				}
+			}
+		}
+
+		const criticalCount = findings.filter(
+			(f) => f.severity === 'critical',
+		).length;
+		const highCount = findings.filter((f) => f.severity === 'high').length;
+
+		return {
+			ecosystem: 'pip',
+			command,
+			findings,
+			criticalCount,
+			highCount,
+			totalCount: findings.length,
+			clean: findings.length === 0,
+		};
+	} catch (error) {
+		const errorMessage =
+			error instanceof Error ? error.message : 'Unknown error';
+		if (
+			errorMessage.includes('not found') ||
+			errorMessage.includes('not recognized') ||
+			errorMessage.includes('pip-audit')
+		) {
+			return {
+				ecosystem: 'pip',
+				command,
+				findings: [],
+				criticalCount: 0,
+				highCount: 0,
+				totalCount: 0,
+				clean: true,
+				note: 'pip-audit not installed. Install with: pip install pip-audit',
+			};
+		}
+		return {
+			ecosystem: 'pip',
+			command,
+			findings: [],
+			criticalCount: 0,
+			highCount: 0,
+			totalCount: 0,
+			clean: true,
+			note: `Error running pip-audit: ${errorMessage}`,
+		};
+	}
+}
+
+// ============ Cargo Audit ============
+interface CargoAdvisory {
+	package: string;
+	title: string;
+	id: string;
+	aliases: string[];
+	url: string;
+	cvss: number;
+}
+
+interface CargoPackage {
+	version: string;
+}
+
+interface CargoVersions {
+	patched: string[];
+}
+
+interface CargoAdvisoryItem {
+	advisory: CargoAdvisory;
+	package: CargoPackage;
+	versions: CargoVersions;
+}
+
+interface CargoVulnsList {
+	list: CargoAdvisoryItem[];
+}
+
+interface CargoAuditResponse {
+	vulnerabilities?: CargoVulnsList;
+}
+
+async function runCargoAudit(): Promise<AuditResult> {
+	const command = ['cargo', 'audit', '--json'];
+
+	try {
+		const proc = Bun.spawn(command, {
+			stdout: 'pipe',
+			stderr: 'pipe',
+			cwd: process.cwd(),
+		});
+
+		const timeoutPromise = new Promise<'timeout'>((resolve) =>
+			setTimeout(() => resolve('timeout'), AUDIT_TIMEOUT_MS),
+		);
+		const result = await Promise.race([
+			Promise.all([
+				new Response(proc.stdout).text(),
+				new Response(proc.stderr).text(),
+			]).then(([stdout, stderr]) => ({ stdout, stderr })),
+			timeoutPromise,
+		]);
+
+		if (result === 'timeout') {
+			proc.kill();
+			return {
+				ecosystem: 'cargo',
+				command,
+				findings: [],
+				criticalCount: 0,
+				highCount: 0,
+				totalCount: 0,
+				clean: true,
+				note: `cargo audit timed out after ${AUDIT_TIMEOUT_MS / 1000}s`,
+			};
+		}
+
+		let { stdout, stderr } = result;
+		if (stdout.length > MAX_OUTPUT_BYTES) {
+			stdout = stdout.slice(0, MAX_OUTPUT_BYTES);
+		}
+
+		const exitCode = await proc.exited;
+
+		// If exit code is 0, no vulnerabilities
+		if (exitCode === 0) {
+			return {
+				ecosystem: 'cargo',
+				command,
+				findings: [],
+				criticalCount: 0,
+				highCount: 0,
+				totalCount: 0,
+				clean: true,
+			};
+		}
+
+		// Parse JSON output - cargo audit outputs multiple JSON objects, one per line
+		const findings: VulnerabilityFinding[] = [];
+		const lines = stdout.split('\n').filter((line) => line.trim());
+
+		for (const line of lines) {
+			try {
+				const obj = JSON.parse(line) as CargoAuditResponse;
+				if (obj.vulnerabilities && obj.vulnerabilities.list) {
+					for (const item of obj.vulnerabilities.list) {
+						const cvss = item.advisory.cvss || 0;
+						const severity = mapCargoSeverity(cvss);
+
+						findings.push({
+							package: item.advisory.package,
+							installedVersion: item.package.version,
+							patchedVersion:
+								item.versions.patched && item.versions.patched.length > 0
+									? item.versions.patched[0]
+									: null,
+							severity,
+							title: item.advisory.title,
+							cve:
+								item.advisory.aliases && item.advisory.aliases.length > 0
+									? item.advisory.aliases[0]
+									: item.advisory.id
+										? item.advisory.id
+										: null,
+							url: item.advisory.url || null,
+						});
+					}
+				}
+			} catch {
+				// Skip non-JSON lines
+			}
+		}
+
+		const criticalCount = findings.filter(
+			(f) => f.severity === 'critical',
+		).length;
+		const highCount = findings.filter((f) => f.severity === 'high').length;
+
+		return {
+			ecosystem: 'cargo',
+			command,
+			findings,
+			criticalCount,
+			highCount,
+			totalCount: findings.length,
+			clean: findings.length === 0,
+		};
+	} catch (error) {
+		const errorMessage =
+			error instanceof Error ? error.message : 'Unknown error';
+		if (
+			errorMessage.includes('not found') ||
+			errorMessage.includes('not recognized') ||
+			errorMessage.includes('cargo-audit')
+		) {
+			return {
+				ecosystem: 'cargo',
+				command,
+				findings: [],
+				criticalCount: 0,
+				highCount: 0,
+				totalCount: 0,
+				clean: true,
+				note: 'cargo-audit not installed. Install with: cargo install cargo-audit',
+			};
+		}
+		return {
+			ecosystem: 'cargo',
+			command,
+			findings: [],
+			criticalCount: 0,
+			highCount: 0,
+			totalCount: 0,
+			clean: true,
+			note: `Error running cargo audit: ${errorMessage}`,
+		};
+	}
+}
+
+function mapCargoSeverity(cvss: number): Severity {
+	if (cvss >= 9.0) return 'critical';
+	if (cvss >= 7.0) return 'high';
+	if (cvss >= 4.0) return 'moderate';
+	return 'low';
+}
+
+// ============ Combined Audit ============
+async function runAutoAudit(): Promise<CombinedAuditResult> {
+	const ecosystems = detectEcosystems();
+
+	if (ecosystems.length === 0) {
+		return {
+			ecosystems: [],
+			findings: [],
+			criticalCount: 0,
+			highCount: 0,
+			totalCount: 0,
+			clean: true,
+		};
+	}
+
+	const results: AuditResult[] = [];
+
+	for (const eco of ecosystems) {
+		switch (eco) {
+			case 'npm':
+				results.push(await runNpmAudit());
+				break;
+			case 'pip':
+				results.push(await runPipAudit());
+				break;
+			case 'cargo':
+				results.push(await runCargoAudit());
+				break;
+		}
+	}
+
+	// Combine findings
+	const allFindings: VulnerabilityFinding[] = [];
+	let totalCritical = 0;
+	let totalHigh = 0;
+
+	for (const result of results) {
+		allFindings.push(...result.findings);
+		totalCritical += result.criticalCount;
+		totalHigh += result.highCount;
+	}
+
+	return {
+		ecosystems,
+		findings: allFindings,
+		criticalCount: totalCritical,
+		highCount: totalHigh,
+		totalCount: allFindings.length,
+		clean: allFindings.length === 0,
+	};
+}
+
+// ============ Tool Definition ============
+export const pkg_audit: ReturnType<typeof tool> = tool({
+	description:
+		'Run package manager security audit (npm, pip, cargo) and return structured CVE data. Use ecosystem to specify which package manager, or "auto" to detect from project files.',
+	args: {
+		ecosystem: tool.schema
+			.enum(['auto', 'npm', 'pip', 'cargo'])
+			.default('auto')
+			.describe(
+				'Package ecosystem to audit: "auto" (detect from project files), "npm", "pip", or "cargo"',
+			),
+	},
+	async execute(args: unknown, _context: unknown): Promise<string> {
+		// Validate arguments
+		if (!validateArgs(args)) {
+			const errorResult = {
+				error:
+					'Invalid arguments: ecosystem must be "auto", "npm", "pip", or "cargo"',
+			};
+			return JSON.stringify(errorResult, null, 2);
+		}
+
+		const obj = args as Record<string, unknown>;
+		const ecosystem: Ecosystem = (obj.ecosystem as Ecosystem) || 'auto';
+
+		// Run the appropriate audit
+		let result: AuditResult | CombinedAuditResult;
+
+		switch (ecosystem) {
+			case 'auto':
+				result = await runAutoAudit();
+				break;
+			case 'npm':
+				result = await runNpmAudit();
+				break;
+			case 'pip':
+				result = await runPipAudit();
+				break;
+			case 'cargo':
+				result = await runCargoAudit();
+				break;
+		}
+
+		return JSON.stringify(result, null, 2);
+	},
+});
