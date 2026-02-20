@@ -1,7 +1,8 @@
-# OpenCode Swarm Installation (Linux + Docker Desktop on Windows)
+# OpenCode Swarm Installation (Linux, Native Windows, and Docker Desktop)
 
 This guide covers a full install for `opencode-swarm` v6.5 on:
 - Native Linux
+- Native Windows (PowerShell)
 - Windows via Docker Desktop (Linux container)
 
 It includes install, configuration, run, and verification.
@@ -147,18 +148,61 @@ You should see the tool calls for:
 - `complexity_hotspots`
 - `schema_drift`
 
-## 2) Windows via Docker Desktop (Linux Container)
+## 2) Native Windows Install (PowerShell)
+
+### 2.1 Install plugin package
+
+Use one of these in PowerShell:
+
+```powershell
+# Option A: Install plugin via OpenCode helper
+bunx opencode-swarm install
+
+# Option B: Install package globally
+npm i -g opencode-swarm
+```
+
+### 2.2 Enable plugin in OpenCode
+
+Create or update `opencode.json` in the target project:
+
+```json
+{
+  "plugin": ["opencode-swarm"]
+}
+```
+
+### 2.3 Create swarm config
+
+Create `C:\Users\<you>\.config\opencode\opencode-swarm.json` and add your swarm configuration (same schema as Linux).
+
+### 2.4 Run OpenCode
+
+```powershell
+opencode
+```
+
+### 2.5 Verify plugin and tools
+
+```text
+/swarm status
+/swarm agents
+/swarm config
+@mega_architect run todo_extract and complexity_hotspots for this repo
+```
+
+## 3) Windows via Docker Desktop (Linux Container)
 
 This runs OpenCode + plugin inside a Linux container, while your repo stays on Windows.
 
-### 2.1 Prepare folders on Windows
+### 3.1 Prepare folders on Windows
 
 - Project repo (example): `C:\dev\my-project`
 - Swarm/OpenCode config folder: `C:\Users\<you>\.config\opencode`
 
 Ensure `opencode-swarm.json` exists in that config folder.
 
-### 2.2 Run container
+### 3.2 Run container
 
 ```bash
 docker run --rm -it \
@@ -174,7 +218,7 @@ Inside the container:
 npm i -g bun opencode opencode-swarm
 ```
 
-### 2.3 Enable plugin in project config
+### 3.3 Enable plugin in project config
 
 Create `/workspace/opencode.json`:
 
@@ -184,13 +228,13 @@ Create `/workspace/opencode.json`:
 }
 ```
 
-### 2.4 Run OpenCode in container
+### 3.4 Run OpenCode in container
 
 ```bash
 opencode
 ```
 
-### 2.5 Verify in container
+### 3.5 Verify in container
 
 Run these in OpenCode:
 
@@ -200,7 +244,7 @@ Run these in OpenCode:
 @mega_architect run pkg_audit ecosystem:auto and summarize results
 ```
 
-## 3) Optional Dockerfile (repeatable local image)
+## 4) Optional Dockerfile (repeatable local image)
 
 ```dockerfile
 FROM node:20-bullseye
@@ -223,15 +267,16 @@ docker run --rm -it \
   opencode-swarm-local
 ```
 
-## 4) Troubleshooting
+## 5) Troubleshooting
 
 - `plugin not found`: confirm `opencode.json` has `"opencode-swarm"`
 - wrong swarm names: verify `swarms.mega` exists and use `@mega_*` agents
 - tools missing: run `/swarm config` and confirm plugin loaded
 - no API access: ensure model/provider credentials are available in container env
 - Windows mount errors: use forward slashes in Docker volume paths
+- PowerShell policy errors: run shell as user with npm global install permissions
 
-## 5) Quick smoke test
+## 6) Quick smoke test
 
 Run this sequence in OpenCode:
 

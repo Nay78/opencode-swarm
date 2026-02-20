@@ -1,7 +1,7 @@
 # Installation Guide
 
 For full platform-specific setup, see:
-- `docs/installation-linux-docker.md` (native Linux + Docker Desktop on Windows)
+- `docs/installation-linux-docker.md` (native Linux + native Windows + Docker Desktop on Windows)
 - `docs/installation-llm-operator.md` (LLM-executable install and validation runbook)
 
 ## Quick Start

@@ -483,7 +483,7 @@ Five tools that improve planning quality and post-phase validation:
 - [Architecture Deep Dive](docs/architecture.md)
 - [Design Rationale](docs/design-rationale.md)
 - [Installation Guide](docs/installation.md)
-- [Linux + Docker Desktop Install Guide](docs/installation-linux-docker.md)
+- [Linux + Native Windows + Docker Desktop Install Guide](docs/installation-linux-docker.md)
 - [LLM Operator Install Guide](docs/installation-llm-operator.md)
 
 ---

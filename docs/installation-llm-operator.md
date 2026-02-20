@@ -23,7 +23,7 @@ Install, configure, and validate `opencode-swarm` v6.5 with all new tools enable
 Collect these before starting:
 
 ```text
-OS mode: linux | windows-docker
+OS mode: linux | windows-native | windows-docker
 Project path: <absolute path>
 OpenCode config path: <absolute path>
 Swarm config path: <absolute path>
@@ -31,6 +31,7 @@ Swarm config path: <absolute path>
 
 Expected defaults:
 - Linux config path: `~/.config/opencode/opencode-swarm.json`
+- Native Windows config path: `C:\Users\<user>\.config\opencode\opencode-swarm.json`
 - Docker config path in container: `/root/.config/opencode/opencode-swarm.json`
 
 ## Procedure A: Native Linux
@@ -141,9 +142,67 @@ If API routes/spec exist, also run:
 Success criteria:
 - tool calls are recognized and return JSON output
 
-## Procedure B: Windows via Docker Desktop
+## Procedure B: Native Windows (PowerShell)
 
-### Step B1: Launch container
+### Step B1: Preflight
+
+Run in PowerShell:
+
+```powershell
+node -v
+npm -v
+bun -v
+opencode --version
+```
+
+### Step B2: Install plugin
+
+```powershell
+bunx opencode-swarm install
+```
+
+Fallback:
+
+```powershell
+npm i -g opencode-swarm
+```
+
+### Step B3: Ensure project plugin config
+
+Target: `<project>\opencode.json`
+
+```json
+{
+  "plugin": ["opencode-swarm"]
+}
+```
+
+### Step B4: Ensure swarm config exists
+
+Target: `C:\Users\<user>\.config\opencode\opencode-swarm.json`
+
+Validate file exists and is valid JSON.
+
+### Step B5: Run OpenCode + validate
+
+Run:
+
+```powershell
+opencode
+```
+
+Then execute:
+
+```text
+/swarm status
+/swarm config
+@mega_architect run todo_extract
+@mega_architect run pkg_audit ecosystem:auto
+```
+
+## Procedure C: Windows via Docker Desktop
+
+### Step C1: Launch container
 
 Use host paths supplied by user. Example:
 
@@ -155,13 +214,13 @@ docker run --rm -it \
   node:20-bullseye bash
 ```
 
-### Step B2: Install runtime + plugin inside container
+### Step C2: Install runtime + plugin inside container
 
 ```bash
 npm i -g bun opencode opencode-swarm
 ```
 
-### Step B3: Ensure `/workspace/opencode.json`
+### Step C3: Ensure `/workspace/opencode.json`
 
 ```json
 {
@@ -169,7 +228,7 @@ npm i -g bun opencode opencode-swarm
 }
 ```
 
-### Step B4: Verify mounted swarm config
+### Step C4: Verify mounted swarm config
 
 Check file exists:
 
@@ -179,7 +238,7 @@ ls -la /root/.config/opencode
 
 Ensure `/root/.config/opencode/opencode-swarm.json` is present.
 
-### Step B5: Run OpenCode + validate
+### Step C5: Run OpenCode + validate
 
 Start:
 
@@ -212,7 +271,7 @@ Use this response format:
 
 ```text
 Install status: PASS|FAIL
-Environment: linux|windows-docker
+Environment: linux|windows-native|windows-docker
 Plugin: opencode-swarm
 
 Checks:
