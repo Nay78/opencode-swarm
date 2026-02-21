@@ -13,6 +13,7 @@ export {
 	PIPELINE_AGENTS,
 	QA_AGENTS,
 } from './constants';
+export { DEFAULT_PLUGIN_CONFIG } from './defaults';
 export type {
 	ApprovalEvidence,
 	BaseEvidence,
