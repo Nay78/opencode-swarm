@@ -8,7 +8,7 @@ const CONFIG_DIR = path.join(
 	'opencode',
 );
 
-const OPENCODE_CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
+const OPENCODE_CONFIG_PATH = path.join(CONFIG_DIR, 'opencode.json');
 const PLUGIN_CONFIG_PATH = path.join(CONFIG_DIR, 'opencode-swarm.json');
 const PROMPTS_DIR = path.join(CONFIG_DIR, 'opencode-swarm');
 
@@ -86,26 +86,170 @@ async function install(): Promise<number> {
 	// Create default plugin config if not exists
 	if (!fs.existsSync(PLUGIN_CONFIG_PATH)) {
 		const defaultConfig = {
-			preset: 'remote',
-			presets: {
-				remote: {
-					architect: { model: 'anthropic/claude-sonnet-4.5' },
-					coder: { model: 'openai/gpt-5.2-codex' },
-					sme: { model: 'google/gemini-3-flash' },
-					reviewer: { model: 'google/gemini-3-flash' },
-					test_engineer: { model: 'google/gemini-3-flash' },
-				},
-				hybrid: {
-					architect: { model: 'anthropic/claude-sonnet-4.5' },
-					coder: { model: 'ollama/qwen3:72b' },
-					sme: { model: 'npu/qwen3:14b' },
-					reviewer: { model: 'npu/qwen3:14b' },
-					test_engineer: { model: 'npu/qwen3:14b' },
+			agents: {
+				architect: { model: 'anthropic/claude-sonnet-4.5' },
+				coder: { model: 'openai/gpt-5.2-codex' },
+				sme: { model: 'google/gemini-3-flash' },
+				reviewer: { model: 'google/gemini-3-flash' },
+				test_engineer: { model: 'google/gemini-3-flash' },
+			},
+			max_iterations: 5,
+			qa_retry_limit: 3,
+			inject_phase_reminders: true,
+			hooks: {
+				system_enhancer: true,
+				compaction: true,
+				agent_activity: true,
+				delegation_tracker: false,
+				agent_awareness_max_chars: 300,
+				delegation_gate: true,
+				delegation_max_chars: 4000,
+			},
+			context_budget: {
+				enabled: true,
+				warn_threshold: 0.7,
+				critical_threshold: 0.9,
+				model_limits: { default: 128000 },
+				max_injection_tokens: 4000,
+				scoring: {
+					enabled: false,
+					max_candidates: 100,
+					weights: {
+						phase: 1.0,
+						current_task: 2.0,
+						blocked_task: 1.5,
+						recent_failure: 2.5,
+						recent_success: 0.5,
+						evidence_presence: 1.0,
+						decision_recency: 1.5,
+						dependency_proximity: 1.0,
+					},
+					decision_decay: {
+						mode: 'exponential',
+						half_life_hours: 24,
+					},
+					token_ratios: {
+						prose: 0.25,
+						code: 0.4,
+						markdown: 0.3,
+						json: 0.35,
+					},
 				},
 			},
-			swarm_mode: 'remote',
-			max_iterations: 5,
-			inject_phase_reminders: true,
+			guardrails: {
+				enabled: true,
+				max_tool_calls: 200,
+				max_duration_minutes: 30,
+				max_repetitions: 10,
+				max_consecutive_errors: 5,
+				warning_threshold: 0.75,
+				idle_timeout_minutes: 60,
+				profiles: {},
+			},
+			evidence: {
+				enabled: true,
+				max_age_days: 90,
+				max_bundles: 1000,
+				auto_archive: false,
+			},
+			summaries: {
+				enabled: true,
+				threshold_bytes: 20480,
+				max_summary_chars: 1000,
+				max_stored_bytes: 10485760,
+				retention_days: 7,
+			},
+			review_passes: {
+				always_security_review: false,
+				security_globs: [
+					'**/auth/**',
+					'**/api/**',
+					'**/crypto/**',
+					'**/security/**',
+					'**/middleware/**',
+					'**/session/**',
+					'**/token/**',
+				],
+			},
+			integration_analysis: { enabled: true },
+			docs: {
+				enabled: true,
+				doc_patterns: [
+					'README.md',
+					'CONTRIBUTING.md',
+					'docs/**/*.md',
+					'docs/**/*.rst',
+					'**/CHANGELOG.md',
+				],
+			},
+			ui_review: { enabled: false },
+			compaction_advisory: {
+				enabled: true,
+				thresholds: [50, 75, 100, 125, 150],
+				message:
+					// biome-ignore lint/suspicious/noTemplateCurlyInString: Intentional placeholder for runtime interpolation
+					'[SWARM HINT] Session has ${totalToolCalls} tool calls. Consider compacting at next phase boundary to maintain context quality.',
+			},
+			lint: {
+				enabled: true,
+				mode: 'check',
+				linter: 'auto',
+				patterns: [
+					'**/*.{ts,tsx,js,jsx,mjs,cjs}',
+					'**/biome.json',
+					'**/biome.jsonc',
+				],
+				exclude: [
+					'**/node_modules/**',
+					'**/dist/**',
+					'**/.git/**',
+					'**/coverage/**',
+					'**/*.min.js',
+				],
+			},
+			secretscan: {
+				enabled: true,
+				patterns: [
+					'**/*.{env,properties,yml,yaml,json,js,ts}',
+					'**/.env*',
+					'**/secrets/**',
+					'**/credentials/**',
+					'**/config/**/*.ts',
+					'**/config/**/*.js',
+				],
+				exclude: [
+					'**/node_modules/**',
+					'**/dist/**',
+					'**/.git/**',
+					'**/coverage/**',
+					'**/test/**',
+					'**/tests/**',
+					'**/__tests__/**',
+					'**/*.test.ts',
+					'**/*.test.js',
+					'**/*.spec.ts',
+					'**/*.spec.js',
+				],
+				extensions: [
+					'.env',
+					'.properties',
+					'.yml',
+					'.yaml',
+					'.json',
+					'.js',
+					'.ts',
+					'.py',
+					'.rb',
+					'.go',
+					'.java',
+					'.cs',
+					'.php',
+				],
+			},
+			checkpoint: {
+				enabled: true,
+				auto_checkpoint_threshold: 3,
+			},
 		};
 		saveJson(PLUGIN_CONFIG_PATH, defaultConfig);
 		console.log('✓ Created default plugin config at:', PLUGIN_CONFIG_PATH);
